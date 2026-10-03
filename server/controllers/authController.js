@@ -268,7 +268,7 @@ const refreshAccessToken = async (req, res) => {
 
 const logoutUser = async (req, res) => {
     try {
-        const user = res.user;
+        const user = req.user;
 
         if (user) {
             user.refreshToken = null;

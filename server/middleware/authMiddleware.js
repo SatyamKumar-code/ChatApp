@@ -31,7 +31,7 @@ const protect = async (req, res, next) => {
         }
 
         // Attach user to request object
-        res.user = user;
+        req.user = user;
 
         next();
 

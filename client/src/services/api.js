@@ -29,7 +29,7 @@ api.interceptors.response.use(
 
             try {
                 // Refresh token cookie automatically 
-                await api.post("/refresh-token");
+                await api.post("/auth/refresh");
 
                 // New access token milne ke baad original request ko dobara bhejna
                 return api(originalRequest);

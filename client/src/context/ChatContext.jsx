@@ -1,7 +1,9 @@
 import {
     createContext,
+    useCallback,
     useContext,
     useEffect,
+    useRef,
     useState,
 } from "react";
 
@@ -18,9 +20,24 @@ const ChatProvider = ({ children }) => {
     const [conversations, setConversations] = useState([]);
     const [loading, setLoading] = useState(true);
 
+    const [contacts, setContacts] = useState([]);
+    const [contactsLoading, setContactsLoading] = useState(false);
+
     const [messages, setMessages] = useState([]);
     const [selectedConversation, setSelectedConversation] = useState(null);
     const [messagesLoading, setMessagesLoading] = useState(false);
+
+    // Typing indicator state
+    const [typingUsers, setTypingUsers] = useState({}); // { conversationId: { userId, userName } }
+    const typingTimeoutRef = useRef(null);
+    const isTypingRef = useRef(false);
+
+    // Keep a ref to selectedConversation for use inside socket handlers
+    const selectedConversationRef = useRef(null);
+
+    useEffect(() => {
+        selectedConversationRef.current = selectedConversation;
+    }, [selectedConversation]);
 
     useEffect(() => {
         if (!user) {
@@ -33,43 +50,266 @@ const ChatProvider = ({ children }) => {
 
         socket.connect();
 
-        socket.on("connect", () => {
+        const handleConnect = () => {
             console.log(
                 "Socket connected:",
                 socket.id
             );
-        });
+        };
 
-        socket.on("socket:connected", (data) => {
+        const handleSocketConnected = (data) => {
             console.log(
                 "Socket authenticated:",
                 data
             );
-        });
+        };
 
-        socket.on("connect_error", (error) => {
+        const handleConnectError = (error) => {
             console.error(
                 "Socket connection error:",
                 error.message
             );
-        });
+        };
 
-        socket.on("disconnect", (reason) => {
+        const handleDisconnect = (reason) => {
             console.log(
                 "Socket disconnected:",
                 reason
             );
-        });
+        };
+
+        const handleNewMessage = (message) => {
+            console.log(
+                "New message received:",
+                message
+            );
+
+            setMessages((prev) => {
+                // Prevent duplicate message
+                const alreadyExists = prev.some(
+                    (item) =>
+                        item._id === message._id
+                );
+
+                if (alreadyExists) {
+                    return prev;
+                }
+
+                return [...prev, message];
+            });
+
+            // If the message is for the currently open conversation and I am the receiver,
+            // immediately mark it as seen
+            const currentConv = selectedConversationRef.current;
+            if (
+                currentConv &&
+                message.conversation === currentConv._id &&
+                message.receiver?._id === user._id
+            ) {
+                socket.emit("message:markSeen", {
+                    conversationId: currentConv._id,
+                });
+            }
+
+            // Refresh chat list
+            getConversations();
+        };
+
+        // ==============================
+        // DELIVERED STATUS HANDLER
+        // ==============================
+        const handleMessageDelivered = (data) => {
+            const { messages: deliveredMsgs } = data;
+
+            if (!deliveredMsgs || deliveredMsgs.length === 0) return;
+
+            setMessages((prev) =>
+                prev.map((msg) => {
+                    const delivered = deliveredMsgs.find(
+                        (d) => d.messageId === msg._id
+                    );
+                    if (delivered) {
+                        return { ...msg, isDelivered: true };
+                    }
+                    return msg;
+                })
+            );
+
+            // Update conversation list to reflect delivered status
+            getConversations();
+        };
+
+        // ==============================
+        // SEEN STATUS HANDLER
+        // ==============================
+        const handleMessageSeen = (data) => {
+            const {
+                conversationId,
+                messages: seenMsgs,
+                seenAt,
+            } = data;
+
+            if (!seenMsgs || seenMsgs.length === 0) return;
+
+            setMessages((prev) =>
+                prev.map((msg) => {
+                    const seen = seenMsgs.find(
+                        (s) => s.messageId === msg._id
+                    );
+                    if (seen) {
+                        return {
+                            ...msg,
+                            isSeen: true,
+                            isDelivered: true,
+                            seenAt,
+                        };
+                    }
+                    return msg;
+                })
+            );
+
+            // Update conversation list
+            getConversations();
+        };
+
+        // ==============================
+        // TYPING INDICATOR HANDLERS
+        // ==============================
+        const handleTypingStart = (data) => {
+            const { conversationId, userId: typingUserId, userName } = data;
+
+            setTypingUsers((prev) => ({
+                ...prev,
+                [conversationId]: {
+                    userId: typingUserId,
+                    userName,
+                },
+            }));
+        };
+
+        const handleTypingStop = (data) => {
+            const { conversationId } = data;
+
+            setTypingUsers((prev) => {
+                const updated = { ...prev };
+                delete updated[conversationId];
+                return updated;
+            });
+        };
+
+        // ==============================
+        // ONLINE / OFFLINE HANDLERS
+        // ==============================
+        const handleUserOnline = (data) => {
+            const { userId: onlineUserId } = data;
+
+            // Update conversations list to reflect online status
+            setConversations((prev) =>
+                prev.map((conv) => {
+                    if (conv.user?._id === onlineUserId) {
+                        return {
+                            ...conv,
+                            user: { ...conv.user, isOnline: true },
+                        };
+                    }
+                    return conv;
+                })
+            );
+        };
+
+        const handleUserOffline = (data) => {
+            const { userId: offlineUserId, lastSeen } = data;
+
+            setConversations((prev) =>
+                prev.map((conv) => {
+                    if (conv.user?._id === offlineUserId) {
+                        return {
+                            ...conv,
+                            user: {
+                                ...conv.user,
+                                isOnline: false,
+                                lastSeen,
+                            },
+                        };
+                    }
+                    return conv;
+                })
+            );
+        };
+
+        socket.on("connect", handleConnect);
+        socket.on("socket:connected", handleSocketConnected);
+        socket.on("connect_error", handleConnectError);
+        socket.on("disconnect", handleDisconnect);
+        socket.on("newMessage", handleNewMessage);
+        socket.on("message:delivered", handleMessageDelivered);
+        socket.on("message:seen", handleMessageSeen);
+        socket.on("typing:start", handleTypingStart);
+        socket.on("typing:stop", handleTypingStop);
+        socket.on("user:online", handleUserOnline);
+        socket.on("user:offline", handleUserOffline);
 
         return () => {
-            socket.off("connect");
-            socket.off("socket:connected");
-            socket.off("connect_error");
-            socket.off("disconnect");
+            socket.off("connect", handleConnect);
+            socket.off("socket:connected", handleSocketConnected);
+            socket.off("connect_error", handleConnectError);
+            socket.off("disconnect", handleDisconnect);
+            socket.off("newMessage", handleNewMessage);
+            socket.off("message:delivered", handleMessageDelivered);
+            socket.off("message:seen", handleMessageSeen);
+            socket.off("typing:start", handleTypingStart);
+            socket.off("typing:stop", handleTypingStop);
+            socket.off("user:online", handleUserOnline);
+            socket.off("user:offline", handleUserOffline);
 
             socket.disconnect();
         };
     }, [user]);
+
+    const addContact = async (phone, name) => {
+        try {
+            const body = { phone };
+            if (name?.trim()) {
+                body.name = name.trim();
+            }
+
+            const response = await api.post("/contacts", body);
+
+            if (response.data.success) {
+                await getContacts();
+
+                return response.data;
+            }
+        } catch (error) {
+            console.error(
+                "Add contact error:",
+                error
+            );
+
+            throw error;
+        }
+    };
+
+    const getContacts = async () => {
+        try {
+            setContactsLoading(true);
+
+            const response = await api.get("/contacts");
+
+            if (response.data.success) {
+                setContacts(response.data.contacts);
+            }
+        } catch (error) {
+            console.error(
+                "Get contacts error:",
+                error
+            );
+
+            setContacts([]);
+        } finally {
+            setContactsLoading(false);
+        }
+    };
 
     const getConversations = async () => {
         try {
@@ -141,49 +381,89 @@ const ChatProvider = ({ children }) => {
     };
 
     const sendMessage = async (text) => {
-        if (
-            !selectedConversation ||
-            !text.trim()
-        ) {
-            return;
+        if (!selectedConversation) return;
+
+        if (!text.trim()) return;
+
+        if (!socket.connected) {
+            throw new Error(
+                "Socket is not connected"
+            );
         }
 
-        try {
-            const response = await api.post(
-                "/messages",
-                {
-                    conversationId:
-                        selectedConversation._id,
+        // Stop typing when sending
+        stopTyping();
 
-                    text: text.trim(),
-                }
-            );
-
-            if (response.data.success) {
-                setMessages((prev) => [
-                    ...prev,
-                    response.data.message,
-                ]);
-
-                await getConversations();
-            }
-
-            return response.data;
-        } catch (error) {
-            console.error(
-                "Send message error:",
-                error
-            );
-
-            throw error;
-        }
+        socket.emit("sendMessage", {
+            conversationId:
+                selectedConversation._id,
+            text: text.trim(),
+        });
     };
 
     const selectConversation = async (conversation) => {
         setSelectedConversation(conversation);
 
         await getMessages(conversation._id);
+
+        // Mark messages as seen when opening a conversation
+        if (socket.connected) {
+            socket.emit("message:markSeen", {
+                conversationId: conversation._id,
+            });
+        }
     };
+
+    // ==============================
+    // TYPING INDICATOR FUNCTIONS
+    // ==============================
+
+    const startTyping = useCallback(() => {
+        if (!selectedConversation || !socket.connected) return;
+
+        const receiverId = selectedConversation.user?._id;
+        if (!receiverId) return;
+
+        if (!isTypingRef.current) {
+            isTypingRef.current = true;
+
+            socket.emit("typing:start", {
+                conversationId: selectedConversation._id,
+                receiverId,
+            });
+        }
+
+        // Clear previous timeout
+        if (typingTimeoutRef.current) {
+            clearTimeout(typingTimeoutRef.current);
+        }
+
+        // Auto-stop typing after 3 seconds of no input
+        typingTimeoutRef.current = setTimeout(() => {
+            stopTyping();
+        }, 3000);
+    }, [selectedConversation]);
+
+    const stopTyping = useCallback(() => {
+        if (!selectedConversation || !socket.connected) return;
+
+        const receiverId = selectedConversation.user?._id;
+        if (!receiverId) return;
+
+        if (isTypingRef.current) {
+            isTypingRef.current = false;
+
+            socket.emit("typing:stop", {
+                conversationId: selectedConversation._id,
+                receiverId,
+            });
+        }
+
+        if (typingTimeoutRef.current) {
+            clearTimeout(typingTimeoutRef.current);
+            typingTimeoutRef.current = null;
+        }
+    }, [selectedConversation]);
 
     useEffect(() => {
         if (user) {
@@ -194,21 +474,39 @@ const ChatProvider = ({ children }) => {
         }
     }, [user]);
 
+    useEffect(() => {
+        if (user) {
+            getContacts();
+        }
+    }, [user]);
+
 
     const value = {
+        // Conversations
         conversations,
         loading,
+        getConversations,
+        openConversation,
 
+        // Messages
         messages,
         messagesLoading,
         selectedConversation,
-
-        getConversations,
-        openConversation,
         getMessages,
         selectConversation,
         sendMessage,
-    };
+
+        // Contacts
+        contacts,
+        contactsLoading,
+        getContacts,
+        addContact,
+
+        // Typing
+        typingUsers,
+        startTyping,
+        stopTyping,
+    }
 
 
     return (

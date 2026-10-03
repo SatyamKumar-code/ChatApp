@@ -36,11 +36,12 @@ const addContact = async (req, res) => {
     try {
         const { name, phone } = req.body;
 
-        if (!name?.trim() || !phone?.trim()) {
+        // Phone is required, name is optional (will be fetched from registered user or set as phone number)
+        if (!phone?.trim()) {
             return res.status(400).json({
                 success: false,
                 error: true,
-                message: "Name and phone are required",
+                message: "Phone number is required",
             });
         }
 
@@ -52,6 +53,15 @@ const addContact = async (req, res) => {
                 success: false,
                 error: true,
                 message: "Invalid phone number format",
+            });
+        }
+
+        // Don't allow adding own number
+        if (normalizedPhone === req.user.phone) {
+            return res.status(400).json({
+                success: false,
+                error: true,
+                message: "You cannot add your own number",
             });
         }
 
@@ -68,16 +78,30 @@ const addContact = async (req, res) => {
             });
         }
 
+        // Check if user is registered on the app
         const registeredUser = await User.findOne({
             phone: normalizedPhone,
-        }).select("_id");
+        }).select("_id name");
+
+        // If no name provided, use registered user's name or phone number as fallback
+        let contactName = name?.trim();
+        if (!contactName) {
+            contactName = registeredUser
+                ? registeredUser.name
+                : normalizedPhone;
+        }
 
         const contact = new Contact({
             owner: req.user._id,
-            name: name.trim(),
+            name: contactName,
             phone: normalizedPhone,
             contactUser: registeredUser ? registeredUser._id : null,
         });
+
+        await contact.save();
+
+        // Populate the contactUser field for the response
+        await contact.populate("contactUser", "name phone profilePic isOnline lastSeen");
 
         res.status(201).json({
             success: true,
@@ -88,7 +112,7 @@ const addContact = async (req, res) => {
                 name: contact.name,
                 phone: contact.phone,
                 registered: Boolean(contact.contactUser),
-                user: contact.contactUser?._id || null,
+                user: contact.contactUser || null,
             },
         });
     } catch (error) {

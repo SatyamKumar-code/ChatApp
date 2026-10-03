@@ -14,7 +14,7 @@ authRouter.get("/me", protect, (req, res) => {
         message: "get user data",
         success: true,
         error: false,
-        user: res.user,
+        user: req.user,
     });
 });
 
