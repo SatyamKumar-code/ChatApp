@@ -54,6 +54,22 @@ const sendMessage = async (req, res) => {
       });
     }
 
+    // Check group message sending permission
+    if (conversation.isGroup && conversation.groupSettings?.onlyAdminsCanSendMessages) {
+      const senderId = req.user._id.toString();
+      const isOwner = conversation.groupAdmin?.toString() === senderId;
+      const isCoAdmin =
+        conversation.groupAdmins &&
+        conversation.groupAdmins.some((a) => (a?._id || a).toString() === senderId);
+
+      if (!isOwner && !isCoAdmin) {
+        return res.status(403).json({
+          success: false,
+          message: "Only group admins can send messages in this group",
+        });
+      }
+    }
+
     // Find receiver for 1-on-1 chats
     let receiverId = null;
     if (!conversation.isGroup) {

@@ -161,9 +161,18 @@ export const ForwardModal = ({ isOpen, message, onClose }) => {
                                 >
                                     <div className="flex items-center gap-3 min-w-0 flex-1">
                                         {conv.isGroup ? (
-                                            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-purple-600 to-indigo-600 flex items-center justify-center text-white font-bold text-sm shadow-md shrink-0">
+                                            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-purple-600 to-indigo-600 flex items-center justify-center text-white font-bold text-sm shadow-md shrink-0 overflow-hidden">
                                                 {conv.groupAvatar ? (
-                                                    <span>{conv.groupAvatar}</span>
+                                                    conv.groupAvatar.startsWith("http") ||
+                                                    conv.groupAvatar.startsWith("data:") ? (
+                                                        <img
+                                                            src={conv.groupAvatar}
+                                                            alt={name}
+                                                            className="w-full h-full object-cover"
+                                                        />
+                                                    ) : (
+                                                        <span className="text-base leading-none">{conv.groupAvatar}</span>
+                                                    )
                                                 ) : (
                                                     <span>👥</span>
                                                 )}

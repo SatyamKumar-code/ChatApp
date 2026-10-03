@@ -3,9 +3,12 @@ import jwt from "jsonwebtoken";
 import User from "../models/User.js";
 import Conversation from "../models/Conversation.js";
 import Message from "../models/Message.js";
+import Call from "../models/Call.js";
 
 // Map<userId, Set<socketId>> — supports multiple devices per user
 const onlineUsers = new Map();
+// Map<callPairKey, activeCallInfo>
+const activeCalls = new Map();
 
 const parseCookies = (cookieHeader) => {
   const cookies = {};
@@ -251,6 +254,20 @@ const setupSocket = (io) => {
                 "You are not a participant of this conversation",
             }
           );
+        }
+
+        // Check group message sending permission
+        if (conversation.isGroup && conversation.groupSettings?.onlyAdminsCanSendMessages) {
+          const isOwner = conversation.groupAdmin?.toString() === userId;
+          const isCoAdmin =
+            conversation.groupAdmins &&
+            conversation.groupAdmins.some((a) => (a?._id || a).toString() === userId);
+
+          if (!isOwner && !isCoAdmin) {
+            return socket.emit("message:error", {
+              message: "Only group admins can send messages in this group",
+            });
+          }
         }
 
         // Handle receiver for 1-on-1 vs group
@@ -649,76 +666,199 @@ const setupSocket = (io) => {
     // WEBRTC CALL SIGNALING
     // ==============================
 
+    // Helper to get call pair key
+    const getCallKey = (u1, u2) => {
+      return [u1, u2].sort().join(":");
+    };
+
     // Initiate Call
-    socket.on("call:initiate", (data) => {
-      const { receiverId, callType = "video", conversationId } = data;
+    socket.on("call:initiate", async (data) => {
+      try {
+        const { receiverId, callType = "video", conversationId } = data;
 
-      if (!receiverId) return;
+        if (!receiverId) return;
 
-      const receiverOnline = isUserOnline(receiverId.toString());
+        const receiverOnline = isUserOnline(receiverId.toString());
 
-      if (!receiverOnline) {
-        return socket.emit("call:userOffline", {
-          receiverId,
-          message: "User is currently offline",
+        if (!receiverOnline) {
+          // Log missed/offline call attempt
+          try {
+            const callDoc = await Call.create({
+              caller: socket.user._id,
+              receiver: receiverId,
+              callType,
+              status: "missed",
+              duration: 0,
+              conversation: conversationId || null,
+            });
+            const populated = await Call.findById(callDoc._id)
+              .populate("caller", "name phone profilePicture isOnline")
+              .populate("receiver", "name phone profilePicture isOnline");
+            socket.emit("call:newRecord", populated);
+          } catch (e) {
+            console.error("Save offline call error:", e);
+          }
+
+          return socket.emit("call:userOffline", {
+            receiverId,
+            message: "User is currently offline",
+          });
+        }
+
+        // Create initial Call log record in DB
+        let callDocId = null;
+        try {
+          const callDoc = await Call.create({
+            caller: socket.user._id,
+            receiver: receiverId,
+            callType,
+            status: "missed", // default unless answered
+            duration: 0,
+            conversation: conversationId || null,
+          });
+          callDocId = callDoc._id;
+        } catch (dbErr) {
+          console.error("Create call doc error:", dbErr);
+        }
+
+        // Track active call state
+        const callKey = getCallKey(userId, receiverId.toString());
+        activeCalls.set(callKey, {
+          callDocId,
+          callerId: userId,
+          receiverId: receiverId.toString(),
+          callType,
+          startTime: null,
         });
+
+        // Send incoming call alert to receiver
+        io.to(`user:${receiverId.toString()}`).emit("call:incoming", {
+          caller: {
+            _id: socket.user._id,
+            name: socket.user.name,
+            profilePicture: socket.user.profilePicture,
+            phone: socket.user.phone,
+          },
+          callType,
+          conversationId,
+        });
+
+        console.log(`Call initiated: ${socket.user.name} -> ${receiverId} (${callType})`);
+      } catch (err) {
+        console.error("Call initiate error:", err);
       }
-
-      // Send incoming call alert to receiver
-      io.to(`user:${receiverId.toString()}`).emit("call:incoming", {
-        caller: {
-          _id: socket.user._id,
-          name: socket.user.name,
-          profilePicture: socket.user.profilePicture,
-          phone: socket.user.phone,
-        },
-        callType,
-        conversationId,
-      });
-
-      console.log(`Call initiated: ${socket.user.name} -> ${receiverId} (${callType})`);
     });
 
     // Accept Call
-    socket.on("call:accept", (data) => {
-      const { callerId } = data;
-      if (!callerId) return;
+    socket.on("call:accept", async (data) => {
+      try {
+        const { callerId } = data;
+        if (!callerId) return;
 
-      io.to(`user:${callerId.toString()}`).emit("call:accepted", {
-        acceptedBy: {
-          _id: socket.user._id,
-          name: socket.user.name,
-          profilePicture: socket.user.profilePicture,
-        },
-      });
+        const callKey = getCallKey(userId, callerId.toString());
+        const callInfo = activeCalls.get(callKey);
 
-      console.log(`Call accepted by ${socket.user.name} for ${callerId}`);
+        if (callInfo) {
+          callInfo.startTime = Date.now();
+          if (callInfo.callDocId) {
+            await Call.findByIdAndUpdate(callInfo.callDocId, {
+              status: "completed",
+            });
+          }
+        }
+
+        io.to(`user:${callerId.toString()}`).emit("call:accepted", {
+          acceptedBy: {
+            _id: socket.user._id,
+            name: socket.user.name,
+            profilePicture: socket.user.profilePicture,
+          },
+        });
+
+        console.log(`Call accepted by ${socket.user.name} for ${callerId}`);
+      } catch (err) {
+        console.error("Call accept error:", err);
+      }
     });
 
     // Reject Call
-    socket.on("call:reject", (data) => {
-      const { callerId, reason = "declined" } = data;
-      if (!callerId) return;
+    socket.on("call:reject", async (data) => {
+      try {
+        const { callerId, reason = "declined" } = data;
+        if (!callerId) return;
 
-      io.to(`user:${callerId.toString()}`).emit("call:rejected", {
-        callerId,
-        rejectedBy: socket.user._id,
-        reason,
-      });
+        const callKey = getCallKey(userId, callerId.toString());
+        const callInfo = activeCalls.get(callKey);
 
-      console.log(`Call rejected by ${socket.user.name} for ${callerId} (${reason})`);
+        if (callInfo && callInfo.callDocId) {
+          await Call.findByIdAndUpdate(callInfo.callDocId, {
+            status: reason === "busy" ? "missed" : "rejected",
+          });
+          const populated = await Call.findById(callInfo.callDocId)
+            .populate("caller", "name phone profilePicture isOnline")
+            .populate("receiver", "name phone profilePicture isOnline");
+
+          if (populated) {
+            io.to(`user:${callerId.toString()}`).emit("call:newRecord", populated);
+            io.to(`user:${userId}`).emit("call:newRecord", populated);
+          }
+          activeCalls.delete(callKey);
+        }
+
+        io.to(`user:${callerId.toString()}`).emit("call:rejected", {
+          callerId,
+          rejectedBy: socket.user._id,
+          reason,
+        });
+
+        console.log(`Call rejected by ${socket.user.name} for ${callerId} (${reason})`);
+      } catch (err) {
+        console.error("Call reject error:", err);
+      }
     });
 
     // End / Hangup Call
-    socket.on("call:end", (data) => {
-      const { targetUserId } = data;
-      if (!targetUserId) return;
+    socket.on("call:end", async (data) => {
+      try {
+        const { targetUserId } = data;
+        if (!targetUserId) return;
 
-      io.to(`user:${targetUserId.toString()}`).emit("call:ended", {
-        endedBy: socket.user._id,
-      });
+        const callKey = getCallKey(userId, targetUserId.toString());
+        const callInfo = activeCalls.get(callKey);
 
-      console.log(`Call ended by ${socket.user.name} for ${targetUserId}`);
+        if (callInfo) {
+          let duration = 0;
+          if (callInfo.startTime) {
+            duration = Math.max(1, Math.floor((Date.now() - callInfo.startTime) / 1000));
+          }
+
+          if (callInfo.callDocId) {
+            await Call.findByIdAndUpdate(callInfo.callDocId, {
+              duration,
+              status: callInfo.startTime ? "completed" : "missed",
+            });
+
+            const populated = await Call.findById(callInfo.callDocId)
+              .populate("caller", "name phone profilePicture isOnline")
+              .populate("receiver", "name phone profilePicture isOnline");
+
+            if (populated) {
+              io.to(`user:${userId}`).emit("call:newRecord", populated);
+              io.to(`user:${targetUserId.toString()}`).emit("call:newRecord", populated);
+            }
+          }
+
+          activeCalls.delete(callKey);
+        }
+
+        io.to(`user:${targetUserId.toString()}`).emit("call:ended", {
+          endedBy: socket.user._id,
+        });
+
+        console.log(`Call ended by ${socket.user.name} for ${targetUserId}`);
+      } catch (err) {
+        console.error("Call end error:", err);
+      }
     });
 
     // Relay WebRTC Signals (Offer, Answer, ICE candidates)

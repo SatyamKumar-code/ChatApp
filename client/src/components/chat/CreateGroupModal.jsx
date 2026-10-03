@@ -1,4 +1,4 @@
-import React, { useContext, useState } from "react";
+import React, { useContext, useRef, useState } from "react";
 import { ChatContext } from "../../context/ChatContext";
 import Avatar from "../common/Avatar";
 
@@ -19,6 +19,32 @@ export const CreateGroupModal = ({ isOpen, onClose }) => {
     const [searching, setSearching] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [errorMsg, setErrorMsg] = useState("");
+    const groupImgInputRef = useRef(null);
+
+    const handleImageFileSelect = (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        if (!file.type.startsWith("image/")) {
+            setErrorMsg("Please select an image file");
+            return;
+        }
+
+        if (file.size > 5 * 1024 * 1024) {
+            setErrorMsg("Image size must be less than 5MB");
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = (uploadEvent) => {
+            setSelectedAvatar(uploadEvent.target.result);
+        };
+        reader.onerror = () => {
+            setErrorMsg("Failed to read image file");
+        };
+        reader.readAsDataURL(file);
+        e.target.value = "";
+    };
 
     if (!isOpen) return null;
 
@@ -148,10 +174,46 @@ export const CreateGroupModal = ({ isOpen, onClose }) => {
                     <div className="flex items-start gap-4">
                         {/* Selected Icon / Avatar */}
                         <div className="flex flex-col items-center gap-1.5 shrink-0">
-                            <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-purple-600 to-indigo-600 flex items-center justify-center text-3xl shadow-lg shadow-purple-900/40 border border-white/10">
-                                {selectedAvatar}
+                            <div className="relative group">
+                                <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-purple-600 to-indigo-600 flex items-center justify-center text-3xl shadow-lg shadow-purple-900/40 border border-white/10 overflow-hidden">
+                                    {selectedAvatar ? (
+                                        selectedAvatar.startsWith("http") ||
+                                        selectedAvatar.startsWith("data:") ? (
+                                            <img
+                                                src={selectedAvatar}
+                                                alt="Group"
+                                                className="w-full h-full object-cover"
+                                            />
+                                        ) : (
+                                            selectedAvatar
+                                        )
+                                    ) : (
+                                        "👥"
+                                    )}
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => groupImgInputRef.current?.click()}
+                                    className="absolute inset-0 rounded-2xl bg-black/60 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center text-white text-[9px] font-semibold transition-opacity cursor-pointer"
+                                >
+                                    <span>📷</span>
+                                    <span>Upload</span>
+                                </button>
                             </div>
-                            <span className="text-[10px] text-zinc-400 font-medium">Icon</span>
+                            <input
+                                type="file"
+                                ref={groupImgInputRef}
+                                onChange={handleImageFileSelect}
+                                accept="image/*"
+                                className="hidden"
+                            />
+                            <button
+                                type="button"
+                                onClick={() => groupImgInputRef.current?.click()}
+                                className="text-[10px] text-purple-400 hover:text-purple-300 font-medium cursor-pointer"
+                            >
+                                Upload Photo
+                            </button>
                         </div>
 
                         {/* Name and Description Inputs */}
@@ -189,9 +251,20 @@ export const CreateGroupModal = ({ isOpen, onClose }) => {
 
                     {/* Avatar Preset Grid */}
                     <div>
-                        <label className="block text-xs font-medium text-zinc-400 mb-2">
-                            Choose Group Icon
-                        </label>
+                        <div className="flex items-center justify-between mb-2">
+                            <label className="block text-xs font-medium text-zinc-400">
+                                Or Pick An Icon
+                            </label>
+                            {selectedAvatar && (
+                                <button
+                                    type="button"
+                                    onClick={() => setSelectedAvatar("👥")}
+                                    className="text-[11px] text-zinc-500 hover:text-zinc-300"
+                                >
+                                    Default 👥
+                                </button>
+                            )}
+                        </div>
                         <div className="flex flex-wrap gap-2 p-2.5 bg-[#101024] rounded-2xl border border-white/5">
                             {PRESET_AVATARS.map((avatar) => (
                                 <button

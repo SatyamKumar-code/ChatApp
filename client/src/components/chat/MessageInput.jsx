@@ -21,7 +21,7 @@ const formatDuration = (seconds) => {
     return `${mins}:${secs < 10 ? "0" : ""}${secs}`;
 };
 
-export const MessageInput = ({ onSendMessage, onTyping, onStopTyping, disabled = false }) => {
+export const MessageInput = ({ onSendMessage, onTyping, onStopTyping, disabled = false, disabledReason = "" }) => {
     const { replyingTo, clearReplyingTo } = useContext(ChatContext);
     const [text, setText] = useState("");
     const [showEmojiPicker, setShowEmojiPicker] = useState(false);
@@ -257,6 +257,30 @@ export const MessageInput = ({ onSendMessage, onTyping, onStopTyping, disabled =
 
     const hasMessageContent = Boolean(text.trim() || selectedFile);
 
+    if (disabledReason) {
+        return (
+            <div className="p-4 bg-[#0d0d1c] border-t border-white/5 flex items-center justify-center select-none animate-in fade-in duration-200">
+                <div className="inline-flex items-center gap-2.5 px-4 py-2.5 rounded-2xl bg-[#151528] border border-white/10 text-zinc-400 text-xs font-medium shadow-inner">
+                    <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        className="w-4 h-4 text-purple-400 shrink-0"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                    >
+                        <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
+                        />
+                    </svg>
+                    <span>{disabledReason}</span>
+                </div>
+            </div>
+        );
+    }
+
     return (
         <div className="p-3 md:p-4 bg-[#0f0f1c] border-t border-white/5 relative">
             {/* Replying Preview Banner */}
@@ -333,7 +357,7 @@ export const MessageInput = ({ onSendMessage, onTyping, onStopTyping, disabled =
 
             {/* Emoji Quick Picker Popup */}
             {showEmojiPicker && !isRecording && (
-                <div className="absolute bottom-full left-14 mb-2 p-3 bg-[#16162c] border border-white/10 rounded-2xl shadow-xl shadow-black/50 z-30 animate-in fade-in zoom-in-95 duration-150">
+                <div className="absolute bottom-full left-4 sm:left-14 mb-2 p-3 bg-[#16162c] border border-white/10 rounded-2xl shadow-xl shadow-black/50 z-30 animate-in fade-in zoom-in-95 duration-150 max-w-[calc(100vw-2rem)]">
                     <div className="grid grid-cols-8 gap-1.5">
                         {QUICK_EMOJIS.map((emoji) => (
                             <button

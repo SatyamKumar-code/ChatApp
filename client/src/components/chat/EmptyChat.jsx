@@ -1,6 +1,6 @@
 import React from "react";
 
-export const EmptyChat = ({ onOpenContacts }) => {
+export const EmptyChat = ({ onOpenGroups, onOpenCreateGroup }) => {
     return (
         <div className="flex-1 flex flex-col items-center justify-center p-8 bg-[#0a0a16] select-none text-center">
             {/* Glow backdrop illustration */}
@@ -30,31 +30,29 @@ export const EmptyChat = ({ onOpenContacts }) => {
                 Select a Conversation
             </h2>
             <p className="text-sm text-zinc-400 mt-2 max-w-sm leading-relaxed">
-                Choose a chat from the sidebar or start a new conversation with your contacts.
+                Choose a chat from the sidebar or start a new conversation with your friends and groups.
             </p>
 
-            {onOpenContacts && (
-                <button
-                    onClick={onOpenContacts}
-                    className="mt-6 px-5 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 active:scale-95 text-white text-xs font-semibold shadow-lg shadow-purple-600/30 transition-all flex items-center gap-2"
-                >
-                    <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        className="w-4 h-4"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
+            <div className="mt-6 flex items-center gap-3">
+                {onOpenGroups && (
+                    <button
+                        onClick={onOpenGroups}
+                        className="px-4 py-2.5 rounded-xl bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/30 hover:border-purple-500/50 active:scale-95 text-xs font-semibold transition-all flex items-center gap-2 cursor-pointer"
                     >
-                        <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"
-                        />
-                    </svg>
-                    Browse Contacts
-                </button>
-            )}
+                        <span>👥</span>
+                        Browse Groups
+                    </button>
+                )}
+                {onOpenCreateGroup && (
+                    <button
+                        onClick={onOpenCreateGroup}
+                        className="px-4 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 active:scale-95 text-white text-xs font-semibold shadow-lg shadow-purple-600/30 transition-all flex items-center gap-2 cursor-pointer"
+                    >
+                        <span>+</span>
+                        New Group
+                    </button>
+                )}
+            </div>
         </div>
     );
 };

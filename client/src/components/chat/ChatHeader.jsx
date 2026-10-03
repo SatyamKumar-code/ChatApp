@@ -190,13 +190,18 @@ export const ChatHeader = ({
                             className="cursor-pointer transition-transform hover:opacity-90"
                         >
                             {partner.isGroup ? (
-                                <div className="w-[42px] h-[42px] rounded-full bg-gradient-to-tr from-purple-600 to-indigo-500 flex items-center justify-center text-white font-bold text-sm shadow-md ring-2 ring-purple-500/20">
+                                <div className="w-[42px] h-[42px] rounded-full bg-gradient-to-tr from-purple-600 to-indigo-500 flex items-center justify-center text-white font-bold text-sm shadow-md ring-2 ring-purple-500/20 overflow-hidden">
                                     {partner.profilePicture ? (
-                                        <img
-                                            src={partner.profilePicture}
-                                            alt={partner.name}
-                                            className="w-full h-full object-cover rounded-full"
-                                        />
+                                        partner.profilePicture.startsWith("http") ||
+                                        partner.profilePicture.startsWith("data:") ? (
+                                            <img
+                                                src={partner.profilePicture}
+                                                alt={partner.name}
+                                                className="w-full h-full object-cover rounded-full"
+                                            />
+                                        ) : (
+                                            <span className="text-xl leading-none">{partner.profilePicture}</span>
+                                        )
                                     ) : (
                                         <svg
                                             xmlns="http://www.w3.org/2000/svg"

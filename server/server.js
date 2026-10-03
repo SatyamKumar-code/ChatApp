@@ -11,6 +11,8 @@ import authRouter from './routes/authRoutes.js';
 import contactRouter from './routes/contactRoutes.js';
 import conversationRouter from './routes/conversationRoutes.js';
 import messageRoutes from './routes/messageRoutes.js';
+import statusRoutes from './routes/statusRoutes.js';
+import callRoutes from './routes/callRoutes.js';
 
 import { Server } from 'socket.io';
 import { setupSocket } from './socket/socketServer.js';
@@ -56,6 +58,8 @@ app.use("/api/auth", authRouter);
 app.use("/api/contacts", contactRouter);
 app.use("/api/conversations", conversationRouter);
 app.use("/api/messages", messageRoutes);
+app.use("/api/status", statusRoutes);
+app.use("/api/calls", callRoutes);
 
 app.get("/", (req, res) => {
     res.json({

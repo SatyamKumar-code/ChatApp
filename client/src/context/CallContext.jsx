@@ -7,6 +7,7 @@ import React, {
     useState,
 } from "react";
 import socket from "../services/socket";
+import api from "../services/api";
 import { AuthContext } from "./AuthContext";
 import {
     playIncomingRing,
@@ -42,6 +43,47 @@ export const CallProvider = ({ children }) => {
     const [isMuted, setIsMuted] = useState(false);
     const [isVideoOff, setIsVideoOff] = useState(false);
     const [callDuration, setCallDuration] = useState(0);
+
+    // Real Call History from Database
+    const [callHistory, setCallHistory] = useState([]);
+
+    // Fetch real call history from backend DB
+    const fetchCallHistory = useCallback(async () => {
+        if (!user?._id) return;
+        try {
+            const res = await api.get("/calls");
+            if (res.data?.success && Array.isArray(res.data?.data)) {
+                setCallHistory(res.data.data);
+            }
+        } catch (err) {
+            console.error("Fetch call history error:", err);
+        }
+    }, [user?._id]);
+
+    useEffect(() => {
+        fetchCallHistory();
+    }, [fetchCallHistory]);
+
+    const addCallRecord = useCallback((record) => {
+        setCallHistory((prev) => [
+            {
+                id: Date.now().toString() + Math.random().toString(36).substring(2, 7),
+                timestamp: new Date().toISOString(),
+                ...record,
+            },
+            ...prev,
+        ].slice(0, 80));
+    }, []);
+
+    const clearCallHistory = useCallback(async () => {
+        try {
+            await api.delete("/calls/clear");
+            setCallHistory([]);
+            localStorage.removeItem("chatapp_call_history");
+        } catch (e) {
+            console.error("Clear call history error:", e);
+        }
+    }, []);
 
     // WebRTC refs
     const peerConnectionRef = useRef(null);
@@ -409,12 +451,45 @@ export const CallProvider = ({ children }) => {
             }
         };
 
+        // 7. Real-time call history sync
+        const handleNewCallRecord = (callDoc) => {
+            if (!callDoc?._id || !user?._id) return;
+            const isCaller = (callDoc.caller?._id || callDoc.caller) === user._id;
+            const contactUser = isCaller ? callDoc.receiver : callDoc.caller;
+
+            let directionStatus = callDoc.status;
+            if (callDoc.status === "completed" || callDoc.status === "rejected") {
+                directionStatus = isCaller ? "outgoing" : "incoming";
+            } else if (callDoc.status === "missed") {
+                directionStatus = isCaller ? "outgoing" : "missed";
+            }
+
+            const formatted = {
+                id: callDoc._id.toString(),
+                _id: callDoc._id.toString(),
+                user: contactUser || { name: "Unknown", phone: "", profilePicture: "" },
+                isCaller,
+                callType: callDoc.callType || "video",
+                status: directionStatus,
+                originalStatus: callDoc.status,
+                duration: callDoc.duration || 0,
+                timestamp: callDoc.createdAt,
+                createdAt: callDoc.createdAt,
+            };
+
+            setCallHistory((prev) => [
+                formatted,
+                ...prev.filter((c) => (c._id || c.id) !== formatted.id),
+            ]);
+        };
+
         socket.on("call:incoming", handleIncomingCall);
         socket.on("call:accepted", handleCallAccepted);
         socket.on("call:rejected", handleCallRejected);
         socket.on("call:userOffline", handleUserOffline);
         socket.on("call:ended", handleCallEnded);
         socket.on("call:signal", handleCallSignal);
+        socket.on("call:newRecord", handleNewCallRecord);
 
         return () => {
             socket.off("call:incoming", handleIncomingCall);
@@ -423,6 +498,7 @@ export const CallProvider = ({ children }) => {
             socket.off("call:userOffline", handleUserOffline);
             socket.off("call:ended", handleCallEnded);
             socket.off("call:signal", handleCallSignal);
+            socket.off("call:newRecord", handleNewCallRecord);
         };
     }, [user, callState, cleanupCall, createPeerConnection]);
 
@@ -435,6 +511,9 @@ export const CallProvider = ({ children }) => {
         isMuted,
         isVideoOff,
         callDuration,
+        callHistory,
+        clearCallHistory,
+        addCallRecord,
         startCall,
         acceptCall,
         rejectCall,

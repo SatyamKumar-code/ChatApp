@@ -273,11 +273,11 @@ const createGroupConversation = async (req, res) => {
     }
 };
 
-// Update group info (Name, Avatar, Description)
+// Update group info (Name, Avatar, Description) or Group Settings (Permissions)
 const updateGroup = async (req, res) => {
     try {
         const { id } = req.params;
-        const { groupName, groupAvatar, groupDescription } = req.body;
+        const { groupName, groupAvatar, groupDescription, groupSettings } = req.body;
 
         const conversation = await Conversation.findById(id);
 
@@ -289,26 +289,75 @@ const updateGroup = async (req, res) => {
         }
 
         const userId = req.user._id.toString();
+        const isParticipant = conversation.participants.some(
+            (p) => (p?._id || p).toString() === userId
+        );
+
+        if (!isParticipant) {
+            return res.status(403).json({
+                success: false,
+                message: "You are not a participant of this group",
+            });
+        }
+
         const isOwner = conversation.groupAdmin?.toString() === userId;
         const isCoAdmin =
             conversation.groupAdmins &&
             conversation.groupAdmins.some((a) => (a?._id || a).toString() === userId);
+        const isAdmin = isOwner || isCoAdmin;
 
-        if (!isOwner && !isCoAdmin) {
-            return res.status(403).json({
-                success: false,
-                message: "Only group admins can update group information",
-            });
+        // If updating groupSettings (permissions), ONLY admins are allowed
+        if (groupSettings !== undefined) {
+            if (!isAdmin) {
+                return res.status(403).json({
+                    success: false,
+                    message: "Only group admins can change group settings",
+                });
+            }
+
+            conversation.groupSettings = {
+                onlyAdminsCanEditInfo: Boolean(
+                    groupSettings.onlyAdminsCanEditInfo !== undefined
+                        ? groupSettings.onlyAdminsCanEditInfo
+                        : conversation.groupSettings?.onlyAdminsCanEditInfo
+                ),
+                onlyAdminsCanSendMessages: Boolean(
+                    groupSettings.onlyAdminsCanSendMessages !== undefined
+                        ? groupSettings.onlyAdminsCanSendMessages
+                        : conversation.groupSettings?.onlyAdminsCanSendMessages
+                ),
+                onlyAdminsCanAddMembers: Boolean(
+                    groupSettings.onlyAdminsCanAddMembers !== undefined
+                        ? groupSettings.onlyAdminsCanAddMembers
+                        : conversation.groupSettings?.onlyAdminsCanAddMembers
+                ),
+            };
         }
 
-        if (groupName && groupName.trim()) {
-            conversation.groupName = groupName.trim();
-        }
-        if (groupAvatar !== undefined) {
-            conversation.groupAvatar = groupAvatar;
-        }
-        if (groupDescription !== undefined) {
-            conversation.groupDescription = groupDescription.trim();
+        // If updating group name, avatar, or description:
+        const hasInfoUpdates =
+            groupName !== undefined ||
+            groupAvatar !== undefined ||
+            groupDescription !== undefined;
+
+        if (hasInfoUpdates) {
+            const onlyAdminsCanEdit = conversation.groupSettings?.onlyAdminsCanEditInfo ?? false;
+            if (!isAdmin && onlyAdminsCanEdit) {
+                return res.status(403).json({
+                    success: false,
+                    message: "Only group admins can update group information",
+                });
+            }
+
+            if (groupName !== undefined && groupName.trim()) {
+                conversation.groupName = groupName.trim();
+            }
+            if (groupAvatar !== undefined) {
+                conversation.groupAvatar = groupAvatar;
+            }
+            if (groupDescription !== undefined) {
+                conversation.groupDescription = groupDescription.trim();
+            }
         }
 
         await conversation.save();
@@ -372,15 +421,28 @@ const addGroupMembers = async (req, res) => {
         }
 
         const userId = req.user._id.toString();
+        const isParticipant = conversation.participants.some(
+            (p) => (p?._id || p).toString() === userId
+        );
+
+        if (!isParticipant) {
+            return res.status(403).json({
+                success: false,
+                message: "You are not a member of this group",
+            });
+        }
+
         const isOwner = conversation.groupAdmin?.toString() === userId;
         const isCoAdmin =
             conversation.groupAdmins &&
             conversation.groupAdmins.some((a) => (a?._id || a).toString() === userId);
+        const isAdmin = isOwner || isCoAdmin;
+        const onlyAdminsCanAdd = conversation.groupSettings?.onlyAdminsCanAddMembers ?? false;
 
-        if (!isOwner && !isCoAdmin) {
+        if (!isAdmin && onlyAdminsCanAdd) {
             return res.status(403).json({
                 success: false,
-                message: "Only group admins can add members",
+                message: "Only group admins can add members to this group",
             });
         }
 

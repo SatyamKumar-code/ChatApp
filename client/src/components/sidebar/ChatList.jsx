@@ -4,7 +4,14 @@ import { ChatContext } from "../../context/ChatContext";
 import Avatar from "../common/Avatar";
 import InviteModal from "../common/InviteModal";
 
-export const ChatList = ({ onSelectChat, onOpenCreateGroup }) => {
+export const ChatList = ({
+    onSelectChat,
+    onOpenCreateGroup,
+    onOpenSettings,
+    activeTab = "chats",
+    setActiveTab,
+    unreadTotal = 0,
+}) => {
     const { user } = useContext(AuthContext);
     const {
         conversations,
@@ -17,8 +24,15 @@ export const ChatList = ({ onSelectChat, onOpenCreateGroup }) => {
         togglePinConversation,
     } = useContext(ChatContext);
 
+    const isGroupsView = activeTab === "groups";
+
     const [searchQuery, setSearchQuery] = useState("");
-    const [filterType, setFilterType] = useState("all"); // 'all' | 'unread'
+    const [filterType, setFilterType] = useState("all"); // 'all' | 'unread' | 'direct' | 'groups'
+
+    // Reset filter when tab changes
+    useEffect(() => {
+        setFilterType("all");
+    }, [activeTab]);
 
     // Database search states
     const [dbUsers, setDbUsers] = useState([]);
@@ -56,7 +70,12 @@ export const ChatList = ({ onSelectChat, onOpenCreateGroup }) => {
     const cleanPhone = searchQuery.replace(/\D/g, "");
     const cleanDigits = cleanPhone;
 
-    const existingMatches = conversations.filter((conv) => {
+    // Filter base conversations by tab (groups tab vs all chats)
+    const baseConversations = isGroupsView
+        ? conversations.filter((conv) => conv.isGroup)
+        : conversations;
+
+    const existingMatches = baseConversations.filter((conv) => {
         if (!normalizedQuery) return true;
         const partner = conv.user;
         if (!partner) return false;
@@ -67,7 +86,7 @@ export const ChatList = ({ onSelectChat, onOpenCreateGroup }) => {
         return nameMatch || phoneMatch;
     });
 
-    // Apply unread filter on existing conversations if no search query
+    // Apply filter pills on existing conversations if no search query
     const displayedConversations = !normalizedQuery
         ? existingMatches.filter((conv) => {
               if (filterType === "unread") {
@@ -75,6 +94,12 @@ export const ChatList = ({ onSelectChat, onOpenCreateGroup }) => {
                   return (
                       lastMsg && !lastMsg.isSeen && lastMsg.sender !== user?._id
                   );
+              }
+              if (filterType === "direct") {
+                  return !conv.isGroup;
+              }
+              if (filterType === "groups") {
+                  return Boolean(conv.isGroup);
               }
               return true;
           })
@@ -164,25 +189,76 @@ export const ChatList = ({ onSelectChat, onOpenCreateGroup }) => {
     return (
         <div className="flex-1 flex flex-col min-w-0 bg-[#0f0f1c] select-none h-full border-r border-white/5">
             {/* Header */}
-            <div className="px-5 pt-5 pb-3 border-b border-white/5 space-y-3">
+            <div className="px-4 md:px-5 pt-4 md:pt-5 pb-3 border-b border-white/5 space-y-3">
                 <div className="flex items-center justify-between">
-                    <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
-                        Messages
-                        <span className="text-xs px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-300 font-semibold border border-purple-500/20">
-                            {conversations.length}
-                        </span>
-                    </h2>
-                    {onOpenCreateGroup && (
-                        <button
-                            type="button"
-                            onClick={onOpenCreateGroup}
-                            className="px-2.5 py-1.5 rounded-xl bg-purple-600/15 hover:bg-purple-600/30 border border-purple-500/25 hover:border-purple-500/40 text-purple-300 hover:text-white text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
-                            title="Create New Group"
-                        >
-                            <span className="text-sm">👥</span>
-                            <span>New Group</span>
-                        </button>
-                    )}
+                    <div className="flex items-center gap-2.5">
+                        {/* Mobile profile avatar quick click */}
+                        {onOpenSettings && (
+                            <div
+                                onClick={onOpenSettings}
+                                className="md:hidden cursor-pointer active:scale-95 transition-transform"
+                                title="Profile & Settings"
+                            >
+                                <Avatar
+                                    src={user?.profilePicture}
+                                    name={user?.name}
+                                    size={34}
+                                    isOnline={true}
+                                />
+                            </div>
+                        )}
+                        <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
+                            {isGroupsView ? "Groups" : "Messages"}
+                            <span className="text-xs px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-300 font-semibold border border-purple-500/20">
+                                {isGroupsView
+                                    ? conversations.filter((c) => c.isGroup).length
+                                    : conversations.length}
+                            </span>
+                        </h2>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                        {onOpenCreateGroup && (
+                            <button
+                                type="button"
+                                onClick={onOpenCreateGroup}
+                                className="px-2.5 py-1.5 rounded-xl bg-purple-600/15 hover:bg-purple-600/30 border border-purple-500/25 hover:border-purple-500/40 text-purple-300 hover:text-white text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
+                                title="Create New Group"
+                            >
+                                <span className="text-sm">👥</span>
+                                <span className="hidden sm:inline">New Group</span>
+                            </button>
+                        )}
+                        {onOpenSettings && (
+                            <button
+                                type="button"
+                                onClick={onOpenSettings}
+                                className="md:hidden w-8 h-8 rounded-xl bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+                                title="Settings"
+                            >
+                                <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    className="w-4 h-4"
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                    stroke="currentColor"
+                                >
+                                    <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        strokeWidth={2}
+                                        d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+                                    />
+                                    <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        strokeWidth={2}
+                                        d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                                    />
+                                </svg>
+                            </button>
+                        )}
+                    </div>
                 </div>
 
                 {/* Search Bar */}
@@ -205,7 +281,11 @@ export const ChatList = ({ onSelectChat, onOpenCreateGroup }) => {
                         type="text"
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
-                        placeholder="Search name or 10-digit phone..."
+                        placeholder={
+                            isGroupsView
+                                ? "Search groups..."
+                                : "Search name or 10-digit phone..."
+                        }
                         className="w-full pl-9 pr-8 py-2 rounded-xl bg-[#16162a] border border-white/5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-purple-500/50 focus:bg-[#1a1a32] transition-all"
                     />
                     {searchQuery && (
@@ -223,20 +303,47 @@ export const ChatList = ({ onSelectChat, onOpenCreateGroup }) => {
 
                 {/* Filter Pills (only when not actively searching) */}
                 {!searchQuery && (
-                    <div className="flex items-center gap-1.5 pt-0.5">
+                    <div className="flex items-center gap-1.5 pt-0.5 overflow-x-auto no-scrollbar">
                         <button
                             onClick={() => setFilterType("all")}
-                            className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
+                            className={`px-3 py-1 rounded-lg text-xs font-medium whitespace-nowrap transition-all ${
                                 filterType === "all"
                                     ? "bg-purple-600/20 text-purple-300 border border-purple-500/30"
                                     : "text-zinc-400 hover:text-white hover:bg-white/5"
                             }`}
                         >
-                            All
+                            {isGroupsView ? "All Groups" : "All"}
                         </button>
+
+                        {!isGroupsView && (
+                            <button
+                                onClick={() => setFilterType("direct")}
+                                className={`px-3 py-1 rounded-lg text-xs font-medium whitespace-nowrap transition-all ${
+                                    filterType === "direct"
+                                        ? "bg-purple-600/20 text-purple-300 border border-purple-500/30"
+                                        : "text-zinc-400 hover:text-white hover:bg-white/5"
+                                }`}
+                            >
+                                Direct
+                            </button>
+                        )}
+
+                        {!isGroupsView && (
+                            <button
+                                onClick={() => setFilterType("groups")}
+                                className={`px-3 py-1 rounded-lg text-xs font-medium whitespace-nowrap transition-all ${
+                                    filterType === "groups"
+                                        ? "bg-purple-600/20 text-purple-300 border border-purple-500/30"
+                                        : "text-zinc-400 hover:text-white hover:bg-white/5"
+                                }`}
+                            >
+                                Groups
+                            </button>
+                        )}
+
                         <button
                             onClick={() => setFilterType("unread")}
-                            className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
+                            className={`px-3 py-1 rounded-lg text-xs font-medium whitespace-nowrap transition-all ${
                                 filterType === "unread"
                                     ? "bg-purple-600/20 text-purple-300 border border-purple-500/30"
                                     : "text-zinc-400 hover:text-white hover:bg-white/5"
@@ -249,7 +356,7 @@ export const ChatList = ({ onSelectChat, onOpenCreateGroup }) => {
             </div>
 
             {/* Conversation / Search Results List */}
-            <div className="flex-1 overflow-y-auto divide-y divide-white/[0.03]">
+            <div className="flex-1 overflow-y-auto pb-20 md:pb-0 divide-y divide-white/[0.03]">
                 {loading ? (
                     <div className="p-6 text-center text-xs text-zinc-400 flex flex-col items-center gap-2">
                         <div className="w-5 h-5 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
@@ -291,9 +398,18 @@ export const ChatList = ({ onSelectChat, onOpenCreateGroup }) => {
                                     }`}
                                 >
                                     {conv.isGroup ? (
-                                        <div className="w-[46px] h-[46px] rounded-2xl bg-gradient-to-tr from-purple-600 to-indigo-600 flex items-center justify-center text-white font-bold text-xl shadow-md ring-2 ring-purple-500/20 shrink-0">
+                                        <div className="w-[46px] h-[46px] rounded-2xl bg-gradient-to-tr from-purple-600 to-indigo-600 flex items-center justify-center text-white font-bold text-xl shadow-md ring-2 ring-purple-500/20 shrink-0 overflow-hidden">
                                             {conv.groupAvatar ? (
-                                                <span>{conv.groupAvatar}</span>
+                                                conv.groupAvatar.startsWith("http") ||
+                                                conv.groupAvatar.startsWith("data:") ? (
+                                                    <img
+                                                        src={conv.groupAvatar}
+                                                        alt={partner.name || "Group"}
+                                                        className="w-full h-full object-cover"
+                                                    />
+                                                ) : (
+                                                    <span className="text-xl leading-none">{conv.groupAvatar}</span>
+                                                )
                                             ) : (
                                                 <span className="text-sm">👥</span>
                                             )}
@@ -593,32 +709,57 @@ export const ChatList = ({ onSelectChat, onOpenCreateGroup }) => {
 
                         {/* Default empty list when no conversations yet */}
                         {!searchQuery && displayedConversations.length === 0 && (
-                            <div className="p-8 text-center text-zinc-400 flex flex-col items-center gap-3">
-                                <div className="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center text-zinc-500">
-                                    <svg
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        className="w-6 h-6"
-                                        fill="none"
-                                        viewBox="0 0 24 24"
-                                        stroke="currentColor"
-                                    >
-                                        <path
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                            strokeWidth={1.5}
-                                            d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
-                                        />
-                                    </svg>
+                            isGroupsView ? (
+                                <div className="p-8 text-center text-zinc-400 flex flex-col items-center gap-3">
+                                    <div className="w-14 h-14 rounded-3xl bg-purple-600/15 border border-purple-500/25 flex items-center justify-center text-2xl text-purple-400">
+                                        👥
+                                    </div>
+                                    <div>
+                                        <p className="text-sm font-semibold text-white">
+                                            No groups joined yet
+                                        </p>
+                                        <p className="text-xs text-zinc-400 mt-1 max-w-[240px]">
+                                            Create a new group to chat, share media, and collaborate with your team and friends!
+                                        </p>
+                                    </div>
+                                    {onOpenCreateGroup && (
+                                        <button
+                                            type="button"
+                                            onClick={onOpenCreateGroup}
+                                            className="mt-1 px-4 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-semibold shadow-md shadow-purple-600/30 transition-all cursor-pointer"
+                                        >
+                                            + Create New Group
+                                        </button>
+                                    )}
                                 </div>
-                                <div>
-                                    <p className="text-sm font-medium text-zinc-300">
-                                        No chats yet
-                                    </p>
-                                    <p className="text-xs text-zinc-500 mt-1 max-w-[220px]">
-                                        Search any phone number above to start a direct chat or invite a friend!
-                                    </p>
+                            ) : (
+                                <div className="p-8 text-center text-zinc-400 flex flex-col items-center gap-3">
+                                    <div className="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center text-zinc-500">
+                                        <svg
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            className="w-6 h-6"
+                                            fill="none"
+                                            viewBox="0 0 24 24"
+                                            stroke="currentColor"
+                                        >
+                                            <path
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                                strokeWidth={1.5}
+                                                d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
+                                            />
+                                        </svg>
+                                    </div>
+                                    <div>
+                                        <p className="text-sm font-medium text-zinc-300">
+                                            No chats yet
+                                        </p>
+                                        <p className="text-xs text-zinc-500 mt-1 max-w-[220px]">
+                                            Search any phone number above to start a direct chat or invite a friend!
+                                        </p>
+                                    </div>
                                 </div>
-                            </div>
+                            )
                         )}
                     </>
                 )}
