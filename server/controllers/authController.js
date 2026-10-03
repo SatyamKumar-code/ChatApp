@@ -68,8 +68,9 @@ const registerUser = async (req, res) => {
         const accessToken = generateAccessToken(user._id);
         const refreshToken = generateRefreshToken(user._id);
 
-        // 8. save refresh token
-        user.refreshToken = refreshToken;
+        // 8. Hash and save refresh token
+        const hashedRefreshToken = await bcrypt.hash(refreshToken, 10);
+        user.refreshToken = hashedRefreshToken;
         await user.save();
 
         // 9. Access token cookie
@@ -149,8 +150,9 @@ const loginUser = async (req, res) => {
         const accessToken = generateAccessToken(user._id);
         const refreshToken = generateRefreshToken(user._id);
 
-        // 5. Save refresh token
-        user.refreshToken = refreshToken;
+        // 5. Hash and save refresh token
+        const hashedRefreshToken = await bcrypt.hash(refreshToken, 10);
+        user.refreshToken = hashedRefreshToken;
 
         user.isOnline = true;
         user.lastSeen = null;
@@ -223,16 +225,20 @@ const refreshAccessToken = async (req, res) => {
         // find user by id
         const user = await UserModel.findById(decoded.userId);
 
-        if (!user ) {
+        if (!user || !user.refreshToken) {
             return res.status(401).json({
-                message: "User not found",
+                message: "Invalid refresh token",
                 success: false,
                 error: true
             });
         }
 
-        // Check if refresh token matches stired refresh token
-        if (user.refreshToken !== refreshToken) {
+        // Check if refresh token matches stored hashed refresh token
+        const isMatch = user.refreshToken.startsWith("$2")
+            ? await bcrypt.compare(refreshToken, user.refreshToken)
+            : user.refreshToken === refreshToken;
+
+        if (!isMatch) {
             return res.status(401).json({
                 message: "Invalid refresh token",
                 success: false,
@@ -303,4 +309,114 @@ const logoutUser = async (req, res) => {
     }
 }
 
-export { registerUser, loginUser, refreshAccessToken, logoutUser };
+const updateProfile = async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const { name, about, profilePicture } = req.body;
+
+        const updateData = {};
+        if (name !== undefined) {
+            if (!name.trim()) {
+                return res.status(400).json({
+                    message: "Name cannot be empty",
+                    success: false,
+                    error: true
+                });
+            }
+            updateData.name = name.trim();
+        }
+
+        if (about !== undefined) {
+            updateData.about = about.trim();
+        }
+
+        if (profilePicture !== undefined) {
+            updateData.profilePicture = profilePicture;
+        }
+
+        const updatedUser = await UserModel.findByIdAndUpdate(
+            userId,
+            updateData,
+            { new: true, runValidators: true }
+        ).select("-password -refreshToken");
+
+        if (!updatedUser) {
+            return res.status(404).json({
+                message: "User not found",
+                success: false,
+                error: true
+            });
+        }
+
+        res.status(200).json({
+            message: "Profile updated successfully",
+            success: true,
+            error: false,
+            user: {
+                id: updatedUser._id,
+                _id: updatedUser._id,
+                name: updatedUser.name,
+                phone: updatedUser.phone,
+                profilePicture: updatedUser.profilePicture,
+                about: updatedUser.about,
+                isOnline: updatedUser.isOnline,
+            }
+        });
+    } catch (error) {
+        console.error("Update profile error:", error.message);
+        res.status(500).json({
+            message: error.message || "Failed to update profile",
+            success: false,
+            error: true
+        });
+    }
+};
+
+const searchUsers = async (req, res) => {
+    try {
+        const { query } = req.query;
+
+        if (!query || !query.trim()) {
+            return res.status(200).json({
+                success: true,
+                error: false,
+                users: [],
+            });
+        }
+
+        const trimmed = query.trim();
+        const cleanPhone = trimmed.replace(/\D/g, "");
+
+        const orConditions = [];
+
+        // If phone digits provided
+        if (cleanPhone.length >= 3) {
+            orConditions.push({ phone: { $regex: cleanPhone, $options: "i" } });
+        }
+
+        // If alphanumeric name text provided
+        orConditions.push({ name: { $regex: trimmed, $options: "i" } });
+
+        const users = await UserModel.find({
+            _id: { $ne: req.user._id },
+            $or: orConditions,
+        })
+            .select("name phone profilePicture about isOnline lastSeen")
+            .limit(20);
+
+        return res.status(200).json({
+            success: true,
+            error: false,
+            users,
+        });
+    } catch (error) {
+        console.error("Search users error:", error.message);
+        return res.status(500).json({
+            message: "Failed to search users",
+            success: false,
+            error: true,
+        });
+    }
+};
+
+export { registerUser, loginUser, refreshAccessToken, logoutUser, updateProfile, searchUsers };

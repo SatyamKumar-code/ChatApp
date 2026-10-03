@@ -1,861 +1,313 @@
-import { useContext, useEffect, useRef, useState } from "react";
-
+import React, { useContext, useState } from "react";
 import { AuthContext } from "../context/AuthContext";
 import { ChatContext } from "../context/ChatContext";
 
-// ==============================
-// MESSAGE STATUS COMPONENT
-// ==============================
-const MessageStatus = ({ message, isMyMessage }) => {
-    if (!isMyMessage) return null;
+// Modular Components
+import NavigationRail from "../components/sidebar/NavigationRail";
+import ChatList from "../components/sidebar/ChatList";
+import ContactList from "../components/sidebar/ContactList";
+import AddContactModal from "../components/sidebar/AddContactModal";
+import CreateGroupModal from "../components/chat/CreateGroupModal";
+import ChatHeader from "../components/chat/ChatHeader";
+import MessageList from "../components/chat/MessageList";
+import MessageInput from "../components/chat/MessageInput";
+import EmptyChat from "../components/chat/EmptyChat";
+import ProfilePanel from "../components/profile/ProfilePanel";
+import SettingsModal from "../components/settings/SettingsModal";
+import StarredMessagesModal from "../components/chat/StarredMessagesModal";
+import EncryptionVerifyModal from "../components/chat/EncryptionVerifyModal";
+import IncomingCallModal from "../components/call/IncomingCallModal";
+import CallModal from "../components/call/CallModal";
+import PinnedMessageBanner from "../components/chat/PinnedMessageBanner";
+import ForwardModal from "../components/chat/ForwardModal";
 
-    let statusIcon = "";
-    let statusColor = "#999";
-
-    if (message.isSeen) {
-        statusIcon = "✓✓";
-        statusColor = "#4fc3f7"; // Blue double tick
-    } else if (message.isDelivered) {
-        statusIcon = "✓✓";
-        statusColor = "#999"; // Grey double tick
-    } else {
-        statusIcon = "✓";
-        statusColor = "#999"; // Single grey tick (sent)
-    }
-
-    return (
-        <span
-            style={{
-                marginLeft: "6px",
-                fontSize: "12px",
-                color: statusColor,
-                fontWeight: "bold",
-                letterSpacing: "-1px",
-            }}
-        >
-            {statusIcon}
-        </span>
-    );
-};
-
-const ChatHome = () => {
-    const { user, logout } = useContext(AuthContext);
-
+export const ChatHome = () => {
+    const { user } = useContext(AuthContext);
     const {
         conversations,
-        loading,
-        selectConversation,
-        sendMessage,
         selectedConversation,
+        selectConversation,
         messages,
         messagesLoading,
-        contacts,
-        contactsLoading,
-        getContacts,
-        addContact,
-        openConversation,
-        typingUsers,
+        sendMessage,
         startTyping,
         stopTyping,
+        typingUsers,
+        togglePinMessage,
     } = useContext(ChatContext);
 
-    const [messageText, setMessageText] = useState("");
-    const [sending, setSending] = useState(false);
+    // Active Navigation Tab: 'chats' | 'contacts'
+    const [activeTab, setActiveTab] = useState("chats");
 
-    // Contact form state
-    const [showContactForm, setShowContactForm] = useState(false);
-    const [contactPhone, setContactPhone] = useState("");
-    const [contactName, setContactName] = useState("");
-    const [addingContact, setAddingContact] = useState(false);
-    const [contactError, setContactError] = useState("");
+    // Modal & Drawer States
+    const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+    const [isAddContactOpen, setIsAddContactOpen] = useState(false);
+    const [isCreateGroupOpen, setIsCreateGroupOpen] = useState(false);
+    const [isProfilePanelOpen, setIsProfilePanelOpen] = useState(false);
+    const [isSending, setIsSending] = useState(false);
+    const [isStarredOpen, setIsStarredOpen] = useState(false);
+    const [isVerifyEncryptionOpen, setIsVerifyEncryptionOpen] = useState(false);
+    const [forwardingMessage, setForwardingMessage] = useState(null);
 
-    // Show contacts panel
-    const [showContacts, setShowContacts] = useState(false);
+    // In-Chat Search state
+    const [isSearching, setIsSearching] = useState(false);
+    const [searchTerm, setSearchTerm] = useState("");
+    const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
 
-    // Auto scroll to bottom
-    const messagesEndRef = useRef(null);
+    // Compute matching messages within active chat
+    const matchingMessages = React.useMemo(() => {
+        if (!searchTerm.trim()) return [];
+        const term = searchTerm.toLowerCase();
+        return messages.filter(
+            (msg) =>
+                !msg.isDeleted &&
+                !msg.deletedForEveryone &&
+                ((msg.text && msg.text.toLowerCase().includes(term)) ||
+                 (msg.fileName && msg.fileName.toLowerCase().includes(term)))
+        );
+    }, [messages, searchTerm]);
 
-    useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({
-            behavior: "smooth",
-        });
-    }, [messages]);
+    // Reset search when switching conversations
+    React.useEffect(() => {
+        setIsSearching(false);
+        setSearchTerm("");
+        setCurrentMatchIndex(0);
+    }, [selectedConversation?._id]);
 
-    // Send message
-    const handleSendMessage = async (e) => {
-        e.preventDefault();
-
-        if (!messageText.trim()) return;
-        if (!selectedConversation) return;
-
-        try {
-            setSending(true);
-
-            await sendMessage(messageText);
-
-            // Clear input after successful message
-            setMessageText("");
-        } catch (error) {
-            console.error("Send message error:", error);
-        } finally {
-            setSending(false);
+    // Jump to match in message list
+    const jumpToMatch = (index) => {
+        if (!matchingMessages.length) return;
+        const targetMsg = matchingMessages[index];
+        if (!targetMsg) return;
+        const el = document.getElementById(`msg-${targetMsg._id}`);
+        if (el) {
+            el.scrollIntoView({ behavior: "smooth", block: "center" });
+            el.classList.add("ring-2", "ring-amber-400", "rounded-2xl", "transition-all");
+            setTimeout(() => {
+                el.classList.remove("ring-2", "ring-amber-400");
+            }, 1800);
         }
     };
 
-    // Handle typing
-    const handleInputChange = (e) => {
-        setMessageText(e.target.value);
-
-        if (e.target.value.trim()) {
-            startTyping();
-        } else {
-            stopTyping();
-        }
+    const handleNextMatch = () => {
+        if (matchingMessages.length === 0) return;
+        const nextIndex = (currentMatchIndex + 1) % matchingMessages.length;
+        setCurrentMatchIndex(nextIndex);
+        jumpToMatch(nextIndex);
     };
 
-    // Add contact by phone number
-    const handleAddContact = async (e) => {
-        e.preventDefault();
-
-        if (!contactPhone.trim()) return;
-
-        try {
-            setAddingContact(true);
-            setContactError("");
-
-            await addContact(contactPhone, contactName);
-
-            setContactPhone("");
-            setContactName("");
-            setShowContactForm(false);
-        } catch (error) {
-            setContactError(
-                error.response?.data?.message ||
-                "Failed to add contact"
-            );
-        } finally {
-            setAddingContact(false);
-        }
+    const handlePrevMatch = () => {
+        if (matchingMessages.length === 0) return;
+        const prevIndex =
+            (currentMatchIndex - 1 + matchingMessages.length) % matchingMessages.length;
+        setCurrentMatchIndex(prevIndex);
+        jumpToMatch(prevIndex);
     };
 
-    // Start chat with a contact
-    const handleStartChat = async (contact) => {
-        if (!contact.user) return;
+    React.useEffect(() => {
+        if (matchingMessages.length > 0) {
+            setCurrentMatchIndex(0);
+            jumpToMatch(0);
+        }
+    }, [searchTerm]);
 
-        try {
-            const contactUserId =
-                contact.user._id || contact.user;
-
-            const conversation =
-                await openConversation(contactUserId);
-
-            if (conversation) {
-                await selectConversation(conversation);
-                setShowContacts(false);
+    // Jump directly to starred message (switching conversation if necessary)
+    const handleJumpToStarredMessage = async (msgId, convId) => {
+        if (convId && (!selectedConversation || selectedConversation._id !== convId)) {
+            const targetConv = conversations.find((c) => c._id === convId);
+            if (targetConv) {
+                await selectConversation(targetConv);
             }
-        } catch (error) {
-            console.error("Start chat error:", error);
         }
+        setTimeout(() => {
+            const el = document.getElementById(`msg-${msgId}`);
+            if (el) {
+                el.scrollIntoView({ behavior: "smooth", block: "center" });
+                el.classList.add("ring-2", "ring-amber-400", "rounded-2xl", "transition-all");
+                setTimeout(() => {
+                    el.classList.remove("ring-2", "ring-amber-400");
+                }, 2000);
+            }
+        }, 350);
     };
 
-    // Get typing text for current conversation
+    // Calculate total unread count
+    const totalUnread = conversations.reduce((acc, conv) => {
+        const lastMsg = conv.lastMessage;
+        if (lastMsg && !lastMsg.isSeen && lastMsg.sender !== user?._id) {
+            return acc + 1;
+        }
+        return acc;
+    }, 0);
+
+    // Typing status text for active chat
     const getTypingText = () => {
         if (!selectedConversation) return null;
-
-        const typing =
-            typingUsers[selectedConversation._id];
-
+        const typing = typingUsers[selectedConversation._id];
         if (!typing) return null;
-
-        return `${typing.userName} is typing...`;
+        return `${typing.userName || "User"} is typing...`;
     };
 
-    // Format last seen
-    const formatLastSeen = (date) => {
-        if (!date) return "";
-
-        const d = new Date(date);
-        const now = new Date();
-        const diff = now - d;
-
-        if (diff < 60000) return "just now";
-        if (diff < 3600000)
-            return `${Math.floor(diff / 60000)} min ago`;
-        if (diff < 86400000)
-            return d.toLocaleTimeString([], {
-                hour: "2-digit",
-                minute: "2-digit",
-            });
-
-        return d.toLocaleDateString();
+    // Handle sending a message
+    const handleSendMessage = async (payload) => {
+        if (!payload || !selectedConversation) return;
+        try {
+            setIsSending(true);
+            await sendMessage(payload);
+        } catch (error) {
+            console.error("Failed to send message:", error);
+        } finally {
+            setIsSending(false);
+        }
     };
 
     return (
-        <div
-            style={{
-                display: "flex",
-                height: "100vh",
-                fontFamily: "Arial, sans-serif",
-            }}
-        >
-            {/* ================= LEFT SIDEBAR ================= */}
+        <div className="flex h-screen w-screen overflow-hidden bg-[#0a0a14] text-zinc-100 font-sans antialiased">
+            {/* 1. Left Icon Navigation Rail */}
+            <NavigationRail
+                activeTab={activeTab}
+                setActiveTab={setActiveTab}
+                onOpenSettings={() => setIsSettingsOpen(true)}
+                unreadTotal={totalUnread}
+            />
+
+            {/* 2. Conversations / Contacts Sidebar */}
             <div
-                style={{
-                    width: "350px",
-                    borderRight: "1px solid #ddd",
-                    display: "flex",
-                    flexDirection: "column",
-                }}
+                className={`w-full md:w-80 lg:w-96 shrink-0 h-full flex flex-col ${selectedConversation ? "hidden md:flex" : "flex"
+                    }`}
             >
-                {/* User Header */}
-                <div
-                    style={{
-                        padding: "15px",
-                        borderBottom: "1px solid #ddd",
-                    }}
-                >
-                    <h2>Chat App</h2>
-
-                    <strong>{user?.name}</strong>
-
-                    <p>{user?.phone}</p>
-
-                    <div
-                        style={{
-                            display: "flex",
-                            gap: "8px",
-                            marginTop: "8px",
-                        }}
-                    >
-                        <button
-                            onClick={() => {
-                                setShowContacts(!showContacts);
-                            }}
-                            style={{
-                                padding: "6px 12px",
-                                cursor: "pointer",
-                                backgroundColor:
-                                    showContacts
-                                        ? "#e0e0e0"
-                                        : "#fff",
-                                border: "1px solid #ccc",
-                                borderRadius: "4px",
-                            }}
-                        >
-                            {showContacts
-                                ? "Show Chats"
-                                : "Contacts"}
-                        </button>
-
-                        <button onClick={logout}
-                            style={{
-                                padding: "6px 12px",
-                                cursor: "pointer",
-                                border: "1px solid #ccc",
-                                borderRadius: "4px",
-                            }}
-                        >
-                            Logout
-                        </button>
-                    </div>
-                </div>
-
-                {/* Contacts / Chat List */}
-                <div
-                    style={{
-                        flex: 1,
-                        overflowY: "auto",
-                    }}
-                >
-                    {showContacts ? (
-                        <>
-                            {/* ===== CONTACTS PANEL ===== */}
-                            <div
-                                style={{
-                                    padding: "10px 15px",
-                                    display: "flex",
-                                    justifyContent: "space-between",
-                                    alignItems: "center",
-                                }}
-                            >
-                                <h3 style={{ margin: 0 }}>
-                                    Contacts
-                                </h3>
-
-                                <button
-                                    onClick={() =>
-                                        setShowContactForm(
-                                            !showContactForm
-                                        )
-                                    }
-                                    style={{
-                                        padding: "4px 10px",
-                                        cursor: "pointer",
-                                        border: "1px solid #ccc",
-                                        borderRadius: "4px",
-                                        fontSize: "18px",
-                                        backgroundColor: showContactForm
-                                            ? "#e0e0e0"
-                                            : "#fff",
-                                    }}
-                                >
-                                    {showContactForm ? "✕" : "+"}
-                                </button>
-                            </div>
-
-                            {/* Add Contact Form */}
-                            {showContactForm && (
-                                <form
-                                    onSubmit={handleAddContact}
-                                    style={{
-                                        padding: "10px 15px",
-                                        borderBottom: "1px solid #eee",
-                                        backgroundColor: "#fafafa",
-                                    }}
-                                >
-                                    <input
-                                        type="text"
-                                        value={contactPhone}
-                                        onChange={(e) =>
-                                            setContactPhone(
-                                                e.target.value
-                                            )
-                                        }
-                                        placeholder="Phone number *"
-                                        required
-                                        style={{
-                                            width: "100%",
-                                            padding: "8px",
-                                            marginBottom: "8px",
-                                            border: "1px solid #ccc",
-                                            borderRadius: "4px",
-                                            boxSizing: "border-box",
-                                        }}
-                                    />
-
-                                    <input
-                                        type="text"
-                                        value={contactName}
-                                        onChange={(e) =>
-                                            setContactName(
-                                                e.target.value
-                                            )
-                                        }
-                                        placeholder="Name (optional)"
-                                        style={{
-                                            width: "100%",
-                                            padding: "8px",
-                                            marginBottom: "8px",
-                                            border: "1px solid #ccc",
-                                            borderRadius: "4px",
-                                            boxSizing: "border-box",
-                                        }}
-                                    />
-
-                                    {contactError && (
-                                        <p
-                                            style={{
-                                                color: "red",
-                                                fontSize: "12px",
-                                                margin: "0 0 8px",
-                                            }}
-                                        >
-                                            {contactError}
-                                        </p>
-                                    )}
-
-                                    <button
-                                        type="submit"
-                                        disabled={
-                                            addingContact ||
-                                            !contactPhone.trim()
-                                        }
-                                        style={{
-                                            width: "100%",
-                                            padding: "8px",
-                                            cursor:
-                                                addingContact
-                                                    ? "not-allowed"
-                                                    : "pointer",
-                                            backgroundColor: "#4caf50",
-                                            color: "white",
-                                            border: "none",
-                                            borderRadius: "4px",
-                                        }}
-                                    >
-                                        {addingContact
-                                            ? "Adding..."
-                                            : "Add Contact"}
-                                    </button>
-                                </form>
-                            )}
-
-                            {/* Contacts List */}
-                            {contactsLoading && (
-                                <p style={{ padding: "15px" }}>
-                                    Loading contacts...
-                                </p>
-                            )}
-
-                            {!contactsLoading &&
-                                contacts.length === 0 && (
-                                    <p style={{ padding: "15px" }}>
-                                        No contacts yet
-                                    </p>
-                                )}
-
-                            {!contactsLoading &&
-                                contacts.map((contact) => (
-                                    <div
-                                        key={contact._id}
-                                        onClick={() =>
-                                            handleStartChat(contact)
-                                        }
-                                        style={{
-                                            cursor: contact.registered
-                                                ? "pointer"
-                                                : "default",
-                                            padding: "12px 15px",
-                                            borderBottom:
-                                                "1px solid #eee",
-                                            opacity: contact.registered
-                                                ? 1
-                                                : 0.6,
-                                        }}
-                                    >
-                                        <div
-                                            style={{
-                                                display: "flex",
-                                                justifyContent:
-                                                    "space-between",
-                                                alignItems: "center",
-                                            }}
-                                        >
-                                            <strong>
-                                                {contact.name}
-                                            </strong>
-
-                                            {contact.registered ? (
-                                                <span
-                                                    style={{
-                                                        fontSize: "10px",
-                                                        color: "#4caf50",
-                                                        fontWeight: "bold",
-                                                    }}
-                                                >
-                                                    On ChatApp
-                                                </span>
-                                            ) : (
-                                                <span
-                                                    style={{
-                                                        fontSize: "10px",
-                                                        color: "#999",
-                                                    }}
-                                                >
-                                                    Not registered
-                                                </span>
-                                            )}
-                                        </div>
-
-                                        <p
-                                            style={{
-                                                margin: "4px 0 0",
-                                                fontSize: "13px",
-                                                color: "#666",
-                                            }}
-                                        >
-                                            {contact.phone}
-                                        </p>
-                                    </div>
-                                ))}
-                        </>
-                    ) : (
-                        <>
-                            {/* ===== CHAT LIST ===== */}
-                            <h3
-                                style={{
-                                    padding: "0 15px",
-                                }}
-                            >
-                                Chats
-                            </h3>
-
-                            {loading && (
-                                <p style={{ padding: "15px" }}>
-                                    Loading chats...
-                                </p>
-                            )}
-
-                            {!loading && conversations.length === 0 && (
-                                <p style={{ padding: "15px" }}>
-                                    No chats yet
-                                </p>
-                            )}
-
-                            {!loading &&
-                                conversations.map((conversation) => {
-                                    const chatUser = conversation.user;
-
-                                    if (!chatUser) return null;
-
-                                    const isSelected =
-                                        selectedConversation?._id ===
-                                        conversation._id;
-
-                                    const isTyping =
-                                        typingUsers[conversation._id];
-
-                                    // Unread/delivered status for last message
-                                    const lastMsg =
-                                        conversation.lastMessage;
-
-                                    return (
-                                        <div
-                                            key={conversation._id}
-                                            onClick={() =>
-                                                selectConversation(
-                                                    conversation
-                                                )
-                                            }
-                                            style={{
-                                                cursor: "pointer",
-                                                padding: "12px 15px",
-                                                borderBottom:
-                                                    "1px solid #eee",
-                                                backgroundColor:
-                                                    isSelected
-                                                        ? "#f0f0f0"
-                                                        : "white",
-                                            }}
-                                        >
-                                            <div
-                                                style={{
-                                                    display: "flex",
-                                                    justifyContent:
-                                                        "space-between",
-                                                    alignItems: "center",
-                                                }}
-                                            >
-                                                <strong>
-                                                    {chatUser.name}
-                                                </strong>
-
-                                                {/* Online indicator */}
-                                                <span
-                                                    style={{
-                                                        display:
-                                                            "inline-block",
-                                                        width: "8px",
-                                                        height: "8px",
-                                                        borderRadius:
-                                                            "50%",
-                                                        backgroundColor:
-                                                            chatUser.isOnline
-                                                                ? "#4caf50"
-                                                                : "#ccc",
-                                                    }}
-                                                    title={
-                                                        chatUser.isOnline
-                                                            ? "Online"
-                                                            : `Last seen ${formatLastSeen(chatUser.lastSeen)}`
-                                                    }
-                                                ></span>
-                                            </div>
-
-                                            <p
-                                                style={{
-                                                    margin: "5px 0",
-                                                    fontSize: "14px",
-                                                    color: "#666",
-                                                }}
-                                            >
-                                                {chatUser.phone}
-                                            </p>
-
-                                            {isTyping ? (
-                                                <p
-                                                    style={{
-                                                        margin: "5px 0 0",
-                                                        fontSize: "13px",
-                                                        color: "#4caf50",
-                                                        fontStyle: "italic",
-                                                    }}
-                                                >
-                                                    typing...
-                                                </p>
-                                            ) : (
-                                                lastMsg && (
-                                                    <p
-                                                        style={{
-                                                            margin: "5px 0 0",
-                                                            fontSize: "14px",
-                                                            display: "flex",
-                                                            alignItems: "center",
-                                                        }}
-                                                    >
-                                                        {/* Show tick for sent messages */}
-                                                        {lastMsg.sender === user?._id && (
-                                                            <MessageStatus
-                                                                message={lastMsg}
-                                                                isMyMessage={true}
-                                                            />
-                                                        )}
-                                                        <span
-                                                            style={{
-                                                                overflow: "hidden",
-                                                                textOverflow: "ellipsis",
-                                                                whiteSpace: "nowrap",
-                                                            }}
-                                                        >
-                                                            {lastMsg.text}
-                                                        </span>
-                                                    </p>
-                                                )
-                                            )}
-                                        </div>
-                                    );
-                                })}
-                        </>
-                    )}
-                </div>
+                {activeTab === "chats" ? (
+                    <ChatList
+                        onSelectChat={() => setIsProfilePanelOpen(false)}
+                        onOpenCreateGroup={() => setIsCreateGroupOpen(true)}
+                    />
+                ) : (
+                    <ContactList
+                        onStartChat={() => setActiveTab("chats")}
+                    />
+                )}
             </div>
 
-            {/* ================= CHAT WINDOW ================= */}
+            {/* 3. Main Chat View */}
             <div
-                style={{
-                    flex: 1,
-                    display: "flex",
-                    flexDirection: "column",
-                }}
+                className={`flex-1 flex flex-col h-full min-w-0 bg-[#0c0c1a] relative ${!selectedConversation ? "hidden md:flex" : "flex"
+                    }`}
             >
                 {selectedConversation ? (
                     <>
-                        {/* Chat Header */}
-                        <div
-                            style={{
-                                padding: "15px",
-                                borderBottom: "1px solid #ddd",
-                            }}
-                        >
-                            <div
-                                style={{
-                                    display: "flex",
-                                    alignItems: "center",
-                                    gap: "10px",
-                                }}
-                            >
-                                {/* Online dot */}
-                                <span
-                                    style={{
-                                        display: "inline-block",
-                                        width: "10px",
-                                        height: "10px",
-                                        borderRadius: "50%",
-                                        backgroundColor:
-                                            selectedConversation.user
-                                                ?.isOnline
-                                                ? "#4caf50"
-                                                : "#ccc",
-                                        flexShrink: 0,
-                                    }}
-                                ></span>
+                        {/* Header */}
+                        <ChatHeader
+                            partner={selectedConversation.user}
+                            isTyping={Boolean(typingUsers[selectedConversation._id])}
+                            onToggleProfile={() =>
+                                setIsProfilePanelOpen(!isProfilePanelOpen)
+                            }
+                            isProfileOpen={isProfilePanelOpen}
+                            onBack={() => selectConversation(null)}
+                            isSearching={isSearching}
+                            setIsSearching={setIsSearching}
+                            searchTerm={searchTerm}
+                            setSearchTerm={setSearchTerm}
+                            matchesCount={matchingMessages.length}
+                            currentMatchIndex={currentMatchIndex}
+                            onNextMatch={handleNextMatch}
+                            onPrevMatch={handlePrevMatch}
+                            onOpenStarred={() => setIsStarredOpen(true)}
+                        />
 
-                                <div>
-                                    <h2 style={{ margin: 0 }}>
-                                        {selectedConversation.user?.name}
-                                    </h2>
-
-                                    <p
-                                        style={{
-                                            margin: "2px 0 0",
-                                            color: "#666",
-                                            fontSize: "13px",
-                                        }}
-                                    >
-                                        {selectedConversation.user
-                                            ?.isOnline
-                                            ? "online"
-                                            : `last seen ${formatLastSeen(selectedConversation.user?.lastSeen)}`}
-                                    </p>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Typing Indicator */}
-                        {getTypingText() && (
-                            <div
-                                style={{
-                                    padding: "4px 20px",
-                                    fontSize: "13px",
-                                    color: "#4caf50",
-                                    fontStyle: "italic",
-                                    backgroundColor: "#f9f9f9",
-                                }}
-                            >
-                                {getTypingText()}
-                            </div>
-                        )}
-
-                        {/* Messages */}
-                        <div
-                            style={{
-                                flex: 1,
-                                overflowY: "auto",
-                                padding: "20px",
-                            }}
-                        >
-                            {messagesLoading && (
-                                <p>Loading messages...</p>
-                            )}
-
-                            {!messagesLoading &&
-                                messages.length === 0 && (
-                                    <p>
-                                        No messages yet. Start the conversation.
-                                    </p>
-                                )}
-
-                            {messages.map((message) => {
-                                const isMyMessage =
-                                    message.sender?._id === user?._id;
-
-                                return (
-                                    <div
-                                        key={message._id}
-                                        style={{
-                                            display: "flex",
-                                            justifyContent: isMyMessage
-                                                ? "flex-end"
-                                                : "flex-start",
-                                            marginBottom: "10px",
-                                        }}
-                                    >
-                                        <div
-                                            style={{
-                                                maxWidth: "60%",
-                                                padding: "10px 14px",
-                                                borderRadius: "10px",
-                                                backgroundColor: isMyMessage
-                                                    ? "#dcf8c6"
-                                                    : "#f1f1f1",
-                                            }}
-                                        >
-                                            {!isMyMessage && (
-                                                <p
-                                                    style={{
-                                                        margin: "0 0 5px",
-                                                        fontSize: "12px",
-                                                        fontWeight: "bold",
-                                                    }}
-                                                >
-                                                    {message.sender?.name}
-                                                </p>
-                                            )}
-
-                                            <p
-                                                style={{
-                                                    margin: 0,
-                                                    wordBreak: "break-word",
-                                                }}
-                                            >
-                                                {message.text}
-                                            </p>
-
-                                            <div
-                                                style={{
-                                                    display: "flex",
-                                                    justifyContent: "flex-end",
-                                                    alignItems: "center",
-                                                    marginTop: "4px",
-                                                }}
-                                            >
-                                                <small
-                                                    style={{
-                                                        fontSize: "10px",
-                                                        color: "#777",
-                                                    }}
-                                                >
-                                                    {message.createdAt
-                                                        ? new Date(
-                                                            message.createdAt
-                                                        ).toLocaleTimeString([], {
-                                                            hour: "2-digit",
-                                                            minute: "2-digit",
-                                                        })
-                                                        : ""}
-                                                </small>
-
-                                                {/* Message Status Ticks */}
-                                                <MessageStatus
-                                                    message={message}
-                                                    isMyMessage={isMyMessage}
-                                                />
-                                            </div>
-                                        </div>
-                                    </div>
-                                );
-                            })}
-
-                            <div ref={messagesEndRef} />
-                        </div>
-
-                        {/* Message Input */}
-                        <form
-                            onSubmit={handleSendMessage}
-                            style={{
-                                display: "flex",
-                                padding: "15px",
-                                borderTop: "1px solid #ddd",
-                                gap: "10px",
-                            }}
-                        >
-                            <input
-                                type="text"
-                                value={messageText}
-                                onChange={handleInputChange}
-                                onBlur={() => stopTyping()}
-                                placeholder="Type a message..."
-                                disabled={sending}
-                                style={{
-                                    flex: 1,
-                                    padding: "12px",
-                                    border: "1px solid #ccc",
-                                    borderRadius: "5px",
-                                    outline: "none",
-                                }}
-                            />
-
-                            <button
-                                type="submit"
-                                disabled={
-                                    sending || !messageText.trim()
+                        {/* Pinned Message Banner */}
+                        <PinnedMessageBanner
+                            pinnedMessages={selectedConversation.pinnedMessages}
+                            onUnpin={togglePinMessage}
+                            onJumpToMessage={(msgId) => {
+                                const el = document.getElementById(`msg-${msgId}`);
+                                if (el) {
+                                    el.scrollIntoView({ behavior: "smooth", block: "center" });
+                                    el.classList.add("ring-2", "ring-purple-400", "rounded-2xl");
+                                    setTimeout(() => {
+                                        el.classList.remove("ring-2", "ring-purple-400", "rounded-2xl");
+                                    }, 2000);
                                 }
-                                style={{
-                                    padding: "12px 20px",
-                                    cursor:
-                                        sending || !messageText.trim()
-                                            ? "not-allowed"
-                                            : "pointer",
-                                }}
-                            >
-                                {sending ? "Sending..." : "Send"}
-                            </button>
-                        </form>
+                            }}
+                        />
+
+                        {/* Message History */}
+                        <MessageList
+                            messages={messages}
+                            messagesLoading={messagesLoading}
+                            typingText={getTypingText()}
+                            searchTerm={searchTerm}
+                            onOpenVerifyEncryption={() => setIsVerifyEncryptionOpen(true)}
+                            onForward={(msg) => setForwardingMessage(msg)}
+                        />
+
+                        {/* Message Input Box */}
+                        <MessageInput
+                            onSendMessage={handleSendMessage}
+                            onTyping={startTyping}
+                            onStopTyping={stopTyping}
+                            disabled={isSending}
+                        />
                     </>
                 ) : (
-                    /* No Chat Selected */
-                    <div
-                        style={{
-                            flex: 1,
-                            display: "flex",
-                            justifyContent: "center",
-                            alignItems: "center",
-                        }}
-                    >
-                        <h2>Select a chat to start messaging</h2>
-                    </div>
+                    <EmptyChat onOpenContacts={() => setActiveTab("contacts")} />
                 )}
             </div>
+
+            {/* 4. Right Contact Detail Drawer (Desktop) */}
+            {selectedConversation && isProfilePanelOpen && (
+                <ProfilePanel
+                    partner={selectedConversation.user}
+                    conversation={selectedConversation}
+                    onClose={() => setIsProfilePanelOpen(false)}
+                    onOpenVerifyEncryption={() => setIsVerifyEncryptionOpen(true)}
+                />
+            )}
+
+            {/* 5. Settings Modal (Includes Profile Photo Upload, Appearance, Privacy, Account) */}
+            <SettingsModal
+                isOpen={isSettingsOpen}
+                onClose={() => setIsSettingsOpen(false)}
+            />
+
+            {/* 6. Starred Messages Modal */}
+            <StarredMessagesModal
+                isOpen={isStarredOpen}
+                onClose={() => setIsStarredOpen(false)}
+                conversationId={selectedConversation?._id}
+                onJumpToMessage={handleJumpToStarredMessage}
+            />
+
+            {/* 7. Verify End-to-End Encryption Modal */}
+            <EncryptionVerifyModal
+                isOpen={isVerifyEncryptionOpen}
+                onClose={() => setIsVerifyEncryptionOpen(false)}
+                conversation={selectedConversation}
+                partner={selectedConversation?.user}
+            />
+
+            {/* 8. Add Contact Modal */}
+            <AddContactModal
+                isOpen={isAddContactOpen}
+                onClose={() => setIsAddContactOpen(false)}
+            />
+
+            {/* 9. Create Group Modal */}
+            <CreateGroupModal
+                isOpen={isCreateGroupOpen}
+                onClose={() => setIsCreateGroupOpen(false)}
+            />
+
+            {/* 10. WebRTC Audio & Video Calling Overlays */}
+            <IncomingCallModal />
+            <CallModal />
+
+            {/* 11. Forward Message Modal */}
+            <ForwardModal
+                isOpen={Boolean(forwardingMessage)}
+                message={forwardingMessage}
+                onClose={() => setForwardingMessage(null)}
+            />
         </div>
     );
 };

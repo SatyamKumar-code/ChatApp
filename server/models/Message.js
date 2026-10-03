@@ -17,7 +17,8 @@ const messageSchema = new mongoose.Schema(
     receiver: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: true,
+      required: false,
+      default: null,
     },
 
     text: {
@@ -29,13 +30,28 @@ const messageSchema = new mongoose.Schema(
 
     messageType: {
       type: String,
-      enum: ["text", "image", "file"],
+      enum: ["text", "image", "file", "audio"],
       default: "text",
     },
 
     fileUrl: {
       type: String,
       default: "",
+    },
+
+    fileName: {
+      type: String,
+      default: "",
+    },
+
+    fileSize: {
+      type: Number,
+      default: 0,
+    },
+
+    duration: {
+      type: Number,
+      default: 0,
     },
 
     isDelivered: {
@@ -51,6 +67,55 @@ const messageSchema = new mongoose.Schema(
     seenAt: {
       type: Date,
       default: null,
+    },
+
+    reactions: [
+      {
+        user: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "User",
+          required: true,
+        },
+        emoji: {
+          type: String,
+          required: true,
+        },
+      },
+    ],
+
+    replyTo: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Message",
+      default: null,
+    },
+
+    isDeleted: {
+      type: Boolean,
+      default: false,
+    },
+
+    deletedForEveryone: {
+      type: Boolean,
+      default: false,
+    },
+
+    deletedFor: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
+
+    starredBy: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
+
+    isForwarded: {
+      type: Boolean,
+      default: false,
     },
   },
   {

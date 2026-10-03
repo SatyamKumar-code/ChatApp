@@ -1,13 +1,15 @@
 import { Router } from 'express';
-import { registerUser, loginUser, logoutUser, refreshAccessToken } from '../controllers/authController.js';
+import { registerUser, loginUser, logoutUser, refreshAccessToken, updateProfile, searchUsers } from '../controllers/authController.js';
 import protect from '../middleware/authMiddleware.js';
 
 const authRouter = Router();
 
+authRouter.get("/search", protect, searchUsers);
 authRouter.post("/register", registerUser);
 authRouter.post("/login", loginUser);
 authRouter.post("/refresh", refreshAccessToken);
 authRouter.post("/logout", protect, logoutUser);
+authRouter.put("/profile", protect, updateProfile);
 
 authRouter.get("/me", protect, (req, res) => {
     res.status(200).json({

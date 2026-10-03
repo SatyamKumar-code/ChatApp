@@ -59,12 +59,25 @@ const AuthProvider = ({ children }) => {
         }
     };
 
+    // Update user profile (name, about, profilePicture)
+    const updateProfile = async (profileData) => {
+        const response = await api.put("/auth/profile", profileData);
+        if (response.data.success && response.data.user) {
+            setUser((prev) => ({
+                ...(prev || {}),
+                ...response.data.user,
+            }));
+        }
+        return response.data;
+    };
+
     const value = {
         user,
         loading,
         register,
         login,
         logout,
+        updateProfile,
         getCurrentUser,
     };
 

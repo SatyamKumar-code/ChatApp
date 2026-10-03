@@ -10,6 +10,8 @@ import {
 import api from "../services/api";
 import { AuthContext } from "./AuthContext";
 import socket from "../services/socket";
+import { playMessageSound } from "../utils/callSounds";
+import { encryptMessage, decryptMessage } from "../utils/e2ee";
 
 export const ChatContext = createContext();
 
@@ -26,6 +28,7 @@ const ChatProvider = ({ children }) => {
     const [messages, setMessages] = useState([]);
     const [selectedConversation, setSelectedConversation] = useState(null);
     const [messagesLoading, setMessagesLoading] = useState(false);
+    const [replyingTo, setReplyingTo] = useState(null);
 
     // Typing indicator state
     const [typingUsers, setTypingUsers] = useState({}); // { conversationId: { userId, userName } }
@@ -78,24 +81,31 @@ const ChatProvider = ({ children }) => {
             );
         };
 
-        const handleNewMessage = (message) => {
+        const handleNewMessage = async (message) => {
             console.log(
                 "New message received:",
                 message
             );
 
+            const convId = message.conversation?._id || message.conversation;
+            let decryptedMessage = message;
+            if (message.text && convId) {
+                const decryptedText = await decryptMessage(message.text, convId);
+                decryptedMessage = { ...message, text: decryptedText };
+            }
+
             setMessages((prev) => {
                 // Prevent duplicate message
                 const alreadyExists = prev.some(
                     (item) =>
-                        item._id === message._id
+                        item._id === decryptedMessage._id
                 );
 
                 if (alreadyExists) {
                     return prev;
                 }
 
-                return [...prev, message];
+                return [...prev, decryptedMessage];
             });
 
             // If the message is for the currently open conversation and I am the receiver,
@@ -113,6 +123,11 @@ const ChatProvider = ({ children }) => {
 
             // Refresh chat list
             getConversations();
+
+            // Play sound chime if message was sent by someone else
+            if (message.sender?._id !== user?._id && message.sender !== user?._id) {
+                playMessageSound();
+            }
         };
 
         // ==============================
@@ -237,6 +252,96 @@ const ChatProvider = ({ children }) => {
             );
         };
 
+        // ==============================
+        // REACTION & DELETE HANDLERS
+        // ==============================
+        const handleReactionUpdated = (data) => {
+            const { messageId, reactions } = data;
+            setMessages((prev) =>
+                prev.map((msg) =>
+                    msg._id === messageId ? { ...msg, reactions } : msg
+                )
+            );
+        };
+
+        const handleMessageDeleted = (data) => {
+            const { messageId, deleteType } = data;
+            if (deleteType === "forEveryone") {
+                setMessages((prev) =>
+                    prev.map((msg) =>
+                        msg._id === messageId
+                            ? {
+                                  ...msg,
+                                  isDeleted: true,
+                                  deletedForEveryone: true,
+                                  text: "This message was deleted",
+                                  fileUrl: "",
+                                  fileName: "",
+                                  fileSize: 0,
+                                  duration: 0,
+                                  reactions: [],
+                              }
+                            : msg
+                    )
+                );
+            } else {
+                setMessages((prev) => prev.filter((msg) => msg._id !== messageId));
+            }
+        };
+
+        const handlePinnedMessagesUpdated = async (data) => {
+            const { conversationId, pinnedMessages } = data;
+            const decryptedPinned = await Promise.all(
+                (pinnedMessages || []).map(async (msg) => {
+                    if (msg.text) {
+                        const decryptedText = await decryptMessage(msg.text, conversationId);
+                        return { ...msg, text: decryptedText };
+                    }
+                    return msg;
+                })
+            );
+
+            setSelectedConversation((prev) => {
+                if (!prev || prev._id !== conversationId) return prev;
+                return { ...prev, pinnedMessages: decryptedPinned };
+            });
+
+            setConversations((prev) =>
+                prev.map((c) =>
+                    c._id === conversationId
+                        ? { ...c, pinnedMessages: decryptedPinned }
+                        : c
+                )
+            );
+        };
+
+        const handleGroupUpdated = (updatedGroup) => {
+            setConversations((prev) =>
+                prev.map((c) =>
+                    c._id === updatedGroup._id ? { ...c, ...updatedGroup } : c
+                )
+            );
+            setSelectedConversation((prev) => {
+                if (!prev || prev._id !== updatedGroup._id) return prev;
+                return { ...prev, ...updatedGroup };
+            });
+        };
+
+        const handleGroupCreated = (newGroup) => {
+            setConversations((prev) => {
+                if (prev.some((c) => c._id === newGroup._id)) return prev;
+                return [newGroup, ...prev];
+            });
+        };
+
+        const handleGroupRemoved = ({ conversationId }) => {
+            setConversations((prev) => prev.filter((c) => c._id !== conversationId));
+            setSelectedConversation((prev) => {
+                if (!prev || prev._id !== conversationId) return prev;
+                return null;
+            });
+        };
+
         socket.on("connect", handleConnect);
         socket.on("socket:connected", handleSocketConnected);
         socket.on("connect_error", handleConnectError);
@@ -244,10 +349,16 @@ const ChatProvider = ({ children }) => {
         socket.on("newMessage", handleNewMessage);
         socket.on("message:delivered", handleMessageDelivered);
         socket.on("message:seen", handleMessageSeen);
+        socket.on("message:reactionUpdated", handleReactionUpdated);
+        socket.on("message:deleted", handleMessageDeleted);
         socket.on("typing:start", handleTypingStart);
         socket.on("typing:stop", handleTypingStop);
         socket.on("user:online", handleUserOnline);
         socket.on("user:offline", handleUserOffline);
+        socket.on("conversation:pinnedMessagesUpdated", handlePinnedMessagesUpdated);
+        socket.on("group:updated", handleGroupUpdated);
+        socket.on("group:created", handleGroupCreated);
+        socket.on("group:removed", handleGroupRemoved);
 
         return () => {
             socket.off("connect", handleConnect);
@@ -257,10 +368,16 @@ const ChatProvider = ({ children }) => {
             socket.off("newMessage", handleNewMessage);
             socket.off("message:delivered", handleMessageDelivered);
             socket.off("message:seen", handleMessageSeen);
+            socket.off("message:reactionUpdated", handleReactionUpdated);
+            socket.off("message:deleted", handleMessageDeleted);
             socket.off("typing:start", handleTypingStart);
             socket.off("typing:stop", handleTypingStop);
             socket.off("user:online", handleUserOnline);
             socket.off("user:offline", handleUserOffline);
+            socket.off("conversation:pinnedMessagesUpdated", handlePinnedMessagesUpdated);
+            socket.off("group:updated", handleGroupUpdated);
+            socket.off("group:created", handleGroupCreated);
+            socket.off("group:removed", handleGroupRemoved);
 
             socket.disconnect();
         };
@@ -318,7 +435,20 @@ const ChatProvider = ({ children }) => {
             const response = await api.get("/conversations");
 
             if (response.data.success) {
-                setConversations(response.data.conversations);
+                const convs = response.data.conversations || [];
+                const decryptedConvs = await Promise.all(
+                    convs.map(async (conv) => {
+                        if (conv.lastMessage?.text) {
+                            const decryptedText = await decryptMessage(conv.lastMessage.text, conv._id);
+                            return {
+                                ...conv,
+                                lastMessage: { ...conv.lastMessage, text: decryptedText },
+                            };
+                        }
+                        return conv;
+                    })
+                );
+                setConversations(decryptedConvs);
             }
         } catch (error) {
             console.error(
@@ -357,6 +487,22 @@ const ChatProvider = ({ children }) => {
         }
     };
 
+    const searchUsers = async (query) => {
+        if (!query || !query.trim()) return [];
+        try {
+            const response = await api.get("/auth/search", {
+                params: { query: query.trim() },
+            });
+            if (response.data.success) {
+                return response.data.users || [];
+            }
+            return [];
+        } catch (error) {
+            console.error("Search users error:", error);
+            return [];
+        }
+    };
+
     const getMessages = async (conversationId) => {
         try {
             setMessagesLoading(true);
@@ -366,7 +512,17 @@ const ChatProvider = ({ children }) => {
             );
 
             if (response.data.success) {
-                setMessages(response.data.messages);
+                const rawMsgs = response.data.messages || [];
+                const decryptedMsgs = await Promise.all(
+                    rawMsgs.map(async (msg) => {
+                        if (msg.text) {
+                            const decryptedText = await decryptMessage(msg.text, conversationId);
+                            return { ...msg, text: decryptedText };
+                        }
+                        return msg;
+                    })
+                );
+                setMessages(decryptedMsgs);
             }
         } catch (error) {
             console.error(
@@ -380,37 +536,326 @@ const ChatProvider = ({ children }) => {
         }
     };
 
-    const sendMessage = async (text) => {
+    const sendMessage = async (payload) => {
         if (!selectedConversation) return;
 
-        if (!text.trim()) return;
+        // Support string (for backward compatibility) or object { text, fileUrl, fileName, fileSize, messageType, replyTo }
+        const data = typeof payload === "string" ? { text: payload } : payload || {};
+        const text = data.text ? data.text.trim() : "";
+        const fileUrl = data.fileUrl || "";
+
+        if (!text && !fileUrl) return;
 
         if (!socket.connected) {
-            throw new Error(
-                "Socket is not connected"
-            );
+            throw new Error("Socket is not connected");
         }
 
         // Stop typing when sending
         stopTyping();
 
+        const replyToId = data.replyTo || replyingTo?._id || null;
+
+        // End-to-End Encrypt text with conversation AES-GCM key before transmission
+        const encryptedText = text
+            ? await encryptMessage(text, selectedConversation._id)
+            : "";
+
         socket.emit("sendMessage", {
-            conversationId:
-                selectedConversation._id,
-            text: text.trim(),
+            conversationId: selectedConversation._id,
+            text: encryptedText,
+            fileUrl,
+            fileName: data.fileName || "",
+            fileSize: data.fileSize || 0,
+            duration: data.duration || 0,
+            messageType: data.messageType || (fileUrl ? (fileUrl.startsWith("data:audio") ? "audio" : fileUrl.startsWith("data:image") ? "image" : "file") : "text"),
+            replyTo: replyToId,
         });
+
+        setReplyingTo(null);
+    };
+
+    const reactToMessage = async (messageId, emoji) => {
+        if (!messageId || !emoji || !user) return;
+
+        // Optimistic UI update
+        setMessages((prev) =>
+            prev.map((msg) => {
+                if (msg._id !== messageId) return msg;
+                const existingReactions = msg.reactions ? [...msg.reactions] : [];
+                const myIndex = existingReactions.findIndex(
+                    (r) => (r.user?._id || r.user) === user._id
+                );
+
+                if (myIndex > -1) {
+                    if (existingReactions[myIndex].emoji === emoji) {
+                        existingReactions.splice(myIndex, 1);
+                    } else {
+                        existingReactions[myIndex] = {
+                            ...existingReactions[myIndex],
+                            emoji,
+                        };
+                    }
+                } else {
+                    existingReactions.push({
+                        user: {
+                            _id: user._id,
+                            name: user.name,
+                            profilePicture: user.profilePicture,
+                        },
+                        emoji,
+                    });
+                }
+                return { ...msg, reactions: existingReactions };
+            })
+        );
+
+        if (socket.connected) {
+            socket.emit("message:react", {
+                messageId,
+                emoji,
+                conversationId: selectedConversation?._id,
+            });
+        }
+
+        try {
+            await api.post(`/messages/${messageId}/react`, { emoji });
+        } catch (err) {
+            console.error("Failed to react to message:", err);
+        }
+    };
+
+    const deleteMessage = async (messageId, deleteType = "forEveryone") => {
+        if (!messageId) return;
+
+        // Optimistic UI update
+        if (deleteType === "forEveryone") {
+            setMessages((prev) =>
+                prev.map((msg) =>
+                    msg._id === messageId
+                        ? {
+                              ...msg,
+                              isDeleted: true,
+                              deletedForEveryone: true,
+                              text: "This message was deleted",
+                              fileUrl: "",
+                              fileName: "",
+                              fileSize: 0,
+                              duration: 0,
+                              reactions: [],
+                          }
+                        : msg
+                )
+            );
+        } else {
+            setMessages((prev) => prev.filter((msg) => msg._id !== messageId));
+        }
+
+        if (socket.connected) {
+            socket.emit("message:delete", {
+                messageId,
+                deleteType,
+                conversationId: selectedConversation?._id,
+            });
+        }
+
+        try {
+            await api.post(`/messages/${messageId}/delete`, { deleteType });
+        } catch (err) {
+            console.error("Failed to delete message:", err);
+        }
+    };
+
+    const toggleStarMessage = async (messageId) => {
+        if (!messageId || !user) return;
+
+        // Optimistically update message in state
+        setMessages((prev) =>
+            prev.map((msg) => {
+                if (msg._id !== messageId) return msg;
+                const starredBy = Array.isArray(msg.starredBy) ? [...msg.starredBy] : [];
+                const idx = starredBy.findIndex(
+                    (id) => (id?._id || id)?.toString() === user._id.toString()
+                );
+                if (idx > -1) {
+                    starredBy.splice(idx, 1);
+                } else {
+                    starredBy.push(user._id);
+                }
+                return { ...msg, starredBy };
+            })
+        );
+
+        try {
+            const res = await api.post(`/messages/${messageId}/star`);
+            return res.data;
+        } catch (err) {
+            console.error("Failed to toggle star message:", err);
+        }
+    };
+
+    // Toggle Pin Conversation in Sidebar
+    const togglePinConversation = async (conversationId) => {
+        if (!conversationId) return;
+
+        // Optimistically toggle isPinned and sort
+        setConversations((prev) => {
+            const updated = prev.map((c) => {
+                if (c._id === conversationId) {
+                    return { ...c, isPinned: !c.isPinned };
+                }
+                return c;
+            });
+
+            return [...updated].sort((a, b) => {
+                if (a.isPinned && !b.isPinned) return -1;
+                if (!a.isPinned && b.isPinned) return 1;
+                return new Date(b.lastMessageAt || b.createdAt) - new Date(a.lastMessageAt || a.createdAt);
+            });
+        });
+
+        setSelectedConversation((prev) => {
+            if (!prev || prev._id !== conversationId) return prev;
+            return { ...prev, isPinned: !prev.isPinned };
+        });
+
+        try {
+            const res = await api.post(`/conversations/${conversationId}/pin`);
+            return res.data;
+        } catch (err) {
+            console.error("Failed to toggle pin conversation:", err);
+            getConversations();
+        }
+    };
+
+    // Toggle Pin Message inside active conversation
+    const togglePinMessage = async (messageId) => {
+        const convId = selectedConversation?._id;
+        if (!convId || !messageId) return;
+
+        try {
+            const res = await api.post(`/conversations/${convId}/messages/${messageId}/pin`);
+            const updatedPinned = res.data?.pinnedMessages || [];
+
+            const decryptedPinned = await Promise.all(
+                updatedPinned.map(async (msg) => {
+                    if (msg.text) {
+                        const decryptedText = await decryptMessage(msg.text, convId);
+                        return { ...msg, text: decryptedText };
+                    }
+                    return msg;
+                })
+            );
+
+            setSelectedConversation((prev) => {
+                if (!prev || prev._id !== convId) return prev;
+                return { ...prev, pinnedMessages: decryptedPinned };
+            });
+
+            setConversations((prev) =>
+                prev.map((c) =>
+                    c._id === convId
+                        ? { ...c, pinnedMessages: decryptedPinned }
+                        : c
+                )
+            );
+
+            return res.data;
+        } catch (err) {
+            console.error("Failed to toggle pin message:", err);
+        }
+    };
+
+    // Forward message to one or multiple conversations
+    const forwardMessage = async (message, targetConversationIds) => {
+        if (!message || !Array.isArray(targetConversationIds) || targetConversationIds.length === 0) {
+            return;
+        }
+
+        try {
+            for (const convId of targetConversationIds) {
+                const encryptedText = message.text
+                    ? await encryptMessage(message.text, convId)
+                    : "";
+
+                socket.emit("sendMessage", {
+                    conversationId: convId,
+                    text: encryptedText,
+                    fileUrl: message.fileUrl || "",
+                    fileName: message.fileName || "",
+                    fileSize: message.fileSize || 0,
+                    duration: message.duration || 0,
+                    messageType:
+                        message.messageType ||
+                        (message.fileUrl
+                            ? message.fileUrl.startsWith("data:audio")
+                                ? "audio"
+                                : message.fileUrl.startsWith("data:image")
+                                ? "image"
+                                : "file"
+                            : "text"),
+                    isForwarded: true,
+                });
+            }
+
+            await getConversations();
+        } catch (err) {
+            console.error("Failed to forward message:", err);
+            throw err;
+        }
+    };
+
+    const getStarredMessages = async (conversationId) => {
+        try {
+            const params = {};
+            if (conversationId) params.conversationId = conversationId;
+            const res = await api.get("/messages/starred/all", { params });
+            const list = res.data?.starredMessages || [];
+            const decryptedList = await Promise.all(
+                list.map(async (msg) => {
+                    const convId = msg.conversation?._id || msg.conversation;
+                    if (msg.text && convId) {
+                        const decryptedText = await decryptMessage(msg.text, convId);
+                        return { ...msg, text: decryptedText };
+                    }
+                    return msg;
+                })
+            );
+            return decryptedList;
+        } catch (err) {
+            console.error("Failed to fetch starred messages:", err);
+            return [];
+        }
     };
 
     const selectConversation = async (conversation) => {
-        setSelectedConversation(conversation);
+        setReplyingTo(null);
 
-        await getMessages(conversation._id);
+        if (conversation) {
+            let convToSet = conversation;
+            if (conversation.pinnedMessages && conversation.pinnedMessages.length > 0) {
+                const decryptedPinned = await Promise.all(
+                    conversation.pinnedMessages.map(async (pm) => {
+                        if (pm.text) {
+                            const dt = await decryptMessage(pm.text, conversation._id);
+                            return { ...pm, text: dt };
+                        }
+                        return pm;
+                    })
+                );
+                convToSet = { ...convToSet, pinnedMessages: decryptedPinned };
+            }
+            setSelectedConversation(convToSet);
+            await getMessages(conversation._id);
 
-        // Mark messages as seen when opening a conversation
-        if (socket.connected) {
-            socket.emit("message:markSeen", {
-                conversationId: conversation._id,
-            });
+            // Mark messages as seen when opening a conversation
+            if (socket.connected) {
+                socket.emit("message:markSeen", {
+                    conversationId: conversation._id,
+                });
+            }
+        } else {
+            setSelectedConversation(null);
+            setMessages([]);
         }
     };
 
@@ -421,8 +866,11 @@ const ChatProvider = ({ children }) => {
     const startTyping = useCallback(() => {
         if (!selectedConversation || !socket.connected) return;
 
-        const receiverId = selectedConversation.user?._id;
-        if (!receiverId) return;
+        const receiverId = selectedConversation.isGroup
+            ? null
+            : selectedConversation.user?._id;
+
+        if (!selectedConversation.isGroup && !receiverId) return;
 
         if (!isTypingRef.current) {
             isTypingRef.current = true;
@@ -447,8 +895,11 @@ const ChatProvider = ({ children }) => {
     const stopTyping = useCallback(() => {
         if (!selectedConversation || !socket.connected) return;
 
-        const receiverId = selectedConversation.user?._id;
-        if (!receiverId) return;
+        const receiverId = selectedConversation.isGroup
+            ? null
+            : selectedConversation.user?._id;
+
+        if (!selectedConversation.isGroup && !receiverId) return;
 
         if (isTypingRef.current) {
             isTypingRef.current = false;
@@ -464,6 +915,123 @@ const ChatProvider = ({ children }) => {
             typingTimeoutRef.current = null;
         }
     }, [selectedConversation]);
+
+    // ==============================
+    // GROUP CHAT METHODS
+    // ==============================
+    const createGroup = async ({
+        groupName,
+        participants,
+        groupAvatar = "",
+        groupDescription = "",
+    }) => {
+        try {
+            const response = await api.post("/conversations/group", {
+                groupName,
+                participants,
+                groupAvatar,
+                groupDescription,
+            });
+
+            if (response.data.success) {
+                const newGroup = response.data.conversation;
+                setConversations((prev) => [newGroup, ...prev]);
+                setSelectedConversation(newGroup);
+                setMessages([]);
+                return newGroup;
+            }
+        } catch (error) {
+            console.error("Create group error:", error);
+            throw error;
+        }
+    };
+
+    const updateGroup = async (groupId, data) => {
+        try {
+            const response = await api.put(`/conversations/group/${groupId}`, data);
+            if (response.data.success) {
+                const updated = response.data.conversation;
+                setConversations((prev) =>
+                    prev.map((c) => (c._id === groupId ? updated : c))
+                );
+                if (selectedConversation?._id === groupId) {
+                    setSelectedConversation(updated);
+                }
+                return updated;
+            }
+        } catch (error) {
+            console.error("Update group error:", error);
+            throw error;
+        }
+    };
+
+    const addGroupMembers = async (groupId, members) => {
+        try {
+            const response = await api.post(`/conversations/group/${groupId}/members`, {
+                members,
+            });
+            if (response.data.success) {
+                const updated = response.data.conversation;
+                setConversations((prev) =>
+                    prev.map((c) => (c._id === groupId ? updated : c))
+                );
+                if (selectedConversation?._id === groupId) {
+                    setSelectedConversation(updated);
+                }
+                return updated;
+            }
+        } catch (error) {
+            console.error("Add group members error:", error);
+            throw error;
+        }
+    };
+
+    const leaveOrRemoveGroupMember = async (groupId, memberId) => {
+        try {
+            const response = await api.delete(`/conversations/group/${groupId}/members/${memberId}`);
+            if (response.data.success) {
+                const { conversation: updated, removedMemberId } = response.data;
+                if (removedMemberId === user._id) {
+                    // Current user left
+                    setConversations((prev) => prev.filter((c) => c._id !== groupId));
+                    if (selectedConversation?._id === groupId) {
+                        setSelectedConversation(null);
+                        setMessages([]);
+                    }
+                } else {
+                    setConversations((prev) =>
+                        prev.map((c) => (c._id === groupId ? updated : c))
+                    );
+                    if (selectedConversation?._id === groupId) {
+                        setSelectedConversation(updated);
+                    }
+                }
+                return response.data;
+            }
+        } catch (error) {
+            console.error("Remove group member error:", error);
+            throw error;
+        }
+    };
+
+    const toggleGroupAdmin = async (groupId, memberId) => {
+        try {
+            const response = await api.post(`/conversations/group/${groupId}/admins/${memberId}`);
+            if (response.data.success) {
+                const updated = response.data.conversation;
+                setConversations((prev) =>
+                    prev.map((c) => (c._id === groupId ? updated : c))
+                );
+                if (selectedConversation?._id === groupId) {
+                    setSelectedConversation(updated);
+                }
+                return response.data;
+            }
+        } catch (error) {
+            console.error("Toggle group admin error:", error);
+            throw error;
+        }
+    };
 
     useEffect(() => {
         if (user) {
@@ -495,6 +1063,23 @@ const ChatProvider = ({ children }) => {
         getMessages,
         selectConversation,
         sendMessage,
+        reactToMessage,
+        deleteMessage,
+        toggleStarMessage,
+        getStarredMessages,
+        togglePinConversation,
+        togglePinMessage,
+        forwardMessage,
+        replyingTo,
+        setReplyingTo,
+        clearReplyingTo: () => setReplyingTo(null),
+
+        // Group chats
+        createGroup,
+        updateGroup,
+        addGroupMembers,
+        leaveOrRemoveGroupMember,
+        toggleGroupAdmin,
 
         // Contacts
         contacts,
@@ -502,11 +1087,14 @@ const ChatProvider = ({ children }) => {
         getContacts,
         addContact,
 
+        // Search Users (Database direct lookup)
+        searchUsers,
+
         // Typing
         typingUsers,
         startTyping,
         stopTyping,
-    }
+    };
 
 
     return (
