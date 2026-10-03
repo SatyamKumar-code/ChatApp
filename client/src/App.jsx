@@ -3,14 +3,9 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import ProtectedRoute from "./components/ProtectedRoute";
+import ChatHome from "./pages/ChatHome";
 
-const Home = () => {
-  return (
-    <div>
-      <h1>Home Page</h1>
-    </div>
-  );
-};
+
 
 function App() {
 
@@ -27,7 +22,7 @@ function App() {
           path="/"
           element={
             <ProtectedRoute>
-              <Home />
+              <ChatHome />
             </ProtectedRoute>
           }
         />

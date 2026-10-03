@@ -1,11 +1,19 @@
 import express from 'express';
+import http from 'http';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import cookieParser from 'cookie-parser';
 import connectDB from './config/db.js';
 import dns from "node:dns";
 
+// Routes
 import authRouter from './routes/authRoutes.js';
+import contactRouter from './routes/contactRoutes.js';
+import conversationRouter from './routes/conversationRoutes.js';
+import messageRoutes from './routes/messageRoutes.js';
+
+import { Server } from 'socket.io';
+import { setupSocket } from './socket/socketServer.js';
 
 dns.setServers([
     "8.8.8.8",
@@ -15,6 +23,20 @@ dns.setServers([
 dotenv.config();
 
 const app = express();
+
+// HTTP server
+const server = http.createServer(app);
+
+// Socket.IO server
+const io = new Server(server, {
+    cors: {
+        origin: process.env.CLIENT_URL,
+        credentials: true,
+    },
+});
+
+// Socket setup
+setupSocket(io);
 
 // Middleware
 app.use(
@@ -28,6 +50,9 @@ app.use(express.json());
 app.use(cookieParser());
 
 app.use("/api/auth", authRouter);
+app.use("/api/contacts", contactRouter);
+app.use("/api/conversations", conversationRouter);
+app.use("/api/messages", messageRoutes);
 
 app.get("/", (req, res) => {
     res.json({
@@ -36,10 +61,10 @@ app.get("/", (req, res) => {
     })
 })
 
-const PORT = process.env.PORT;
+const PORT = process.env.PORT || 5000;
 
 connectDB().then(
-    app.listen(PORT, () => {
-        console.log(`Server running on port ${PORT}`)
+    server.listen(PORT, () => {
+        console.log(`Server running on http://localhost:${PORT}`)
     })
 )
