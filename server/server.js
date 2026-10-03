@@ -66,8 +66,15 @@ app.get("/", (req, res) => {
 
 const PORT = process.env.PORT || 5000;
 
-connectDB().then(
+const startServer = async () => {
+    await connectDB();
+
     server.listen(PORT, () => {
-        console.log(`Server running on http://localhost:${PORT}`)
-    })
-)
+        console.log(`Server running on http://localhost:${PORT}`);
+    });
+};
+
+startServer().catch((error) => {
+    console.error("Server startup failed:", error.message);
+    process.exit(1);
+});

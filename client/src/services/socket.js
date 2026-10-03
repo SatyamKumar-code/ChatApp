@@ -1,6 +1,12 @@
 import { io } from "socket.io-client";
 
-const socket = io("http://localhost:5000", {
+const serverUrl = import.meta.env.VITE_SERVER_URL;
+
+if (!serverUrl) {
+  throw new Error("VITE_SERVER_URL is not configured");
+}
+
+const socket = io(serverUrl, {
   withCredentials: true,
   autoConnect: false,
 });
