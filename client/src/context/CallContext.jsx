@@ -35,9 +35,15 @@ export const CallProvider = ({ children }) => {
     const [remoteUser, setRemoteUser] = useState(null);
     const [conversationId, setConversationId] = useState(null);
 
+    // Group Call States
+    const [isGroupCall, setIsGroupCall] = useState(false);
+    const [groupInfo, setGroupInfo] = useState(null); // { _id, name, profilePicture, isGroup }
+    const [groupParticipants, setGroupParticipants] = useState([]); // array of participant user objects
+    const [groupRemoteStreams, setGroupRemoteStreams] = useState({}); // { [userId]: { user, stream } }
+
     // Media Streams
     const [localStream, setLocalStream] = useState(null);
-    const [remoteStream, setRemoteStream] = useState(null);
+    const [remoteStream, setRemoteStream] = useState(null); // For 1-on-1 calls
 
     // Controls
     const [isMuted, setIsMuted] = useState(false);
@@ -86,7 +92,9 @@ export const CallProvider = ({ children }) => {
     }, []);
 
     // WebRTC refs
-    const peerConnectionRef = useRef(null);
+    const peerConnectionRef = useRef(null); // 1-on-1 PC
+    const groupPeersRef = useRef(new Map()); // Map<userId, RTCPeerConnection> for group calls
+    const groupQueuesRef = useRef(new Map()); // Map<userId, candidateArray>
     const localStreamRef = useRef(null);
     const callTimerRef = useRef(null);
     const remoteUserRef = useRef(null);
@@ -96,7 +104,32 @@ export const CallProvider = ({ children }) => {
         remoteUserRef.current = remoteUser;
     }, [remoteUser]);
 
-    // Cleanup tracks & peer connection
+    // Drain queued ICE candidates helper for 1-on-1
+    const drainCandidates = async (peer) => {
+        while (candidateQueueRef.current.length > 0) {
+            const cand = candidateQueueRef.current.shift();
+            try {
+                await peer.addIceCandidate(new RTCIceCandidate(cand));
+            } catch (err) {
+                console.warn("Failed to add buffered ICE candidate:", err);
+            }
+        }
+    };
+
+    // Drain queued ICE candidates helper for Group calls
+    const drainGroupCandidates = async (peer, peerUserId) => {
+        const queue = groupQueuesRef.current.get(peerUserId) || [];
+        while (queue.length > 0) {
+            const cand = queue.shift();
+            try {
+                await peer.addIceCandidate(new RTCIceCandidate(cand));
+            } catch (err) {
+                console.warn("Failed to add group buffered ICE candidate:", err);
+            }
+        }
+    };
+
+    // Cleanup all call tracks & peer connections
     const cleanupCall = useCallback(() => {
         stopAllCallSounds();
 
@@ -110,6 +143,7 @@ export const CallProvider = ({ children }) => {
             localStreamRef.current = null;
         }
 
+        // Close 1-on-1 Peer Connection
         if (peerConnectionRef.current) {
             peerConnectionRef.current.onicecandidate = null;
             peerConnectionRef.current.ontrack = null;
@@ -117,9 +151,26 @@ export const CallProvider = ({ children }) => {
             peerConnectionRef.current = null;
         }
 
+        // Close all Group Peer Connections
+        groupPeersRef.current.forEach((pc) => {
+            try {
+                pc.onicecandidate = null;
+                pc.ontrack = null;
+                pc.close();
+            } catch (e) {
+                console.error("Close group peer error:", e);
+            }
+        });
+        groupPeersRef.current.clear();
+        groupQueuesRef.current.clear();
+
         candidateQueueRef.current = [];
         setLocalStream(null);
         setRemoteStream(null);
+        setGroupRemoteStreams({});
+        setIsGroupCall(false);
+        setGroupInfo(null);
+        setGroupParticipants([]);
         setCallState("idle");
         setRemoteUser(null);
         setConversationId(null);
@@ -128,7 +179,7 @@ export const CallProvider = ({ children }) => {
         setCallDuration(0);
     }, []);
 
-    // Create RTCPeerConnection
+    // Create 1-on-1 RTCPeerConnection
     const createPeerConnection = useCallback((targetUserId) => {
         const pc = new RTCPeerConnection(ICE_SERVERS);
         peerConnectionRef.current = pc;
@@ -148,7 +199,6 @@ export const CallProvider = ({ children }) => {
 
         // When remote tracks arrive
         pc.ontrack = (event) => {
-            console.log("Remote track received:", event);
             if (event.streams && event.streams[0]) {
                 setRemoteStream(event.streams[0]);
             } else if (event.track) {
@@ -170,41 +220,104 @@ export const CallProvider = ({ children }) => {
         return pc;
     }, []);
 
-    // Start Call (Outgoing)
+    // Create Group RTCPeerConnection for a specific participant
+    const createGroupPeerConnection = useCallback(
+        (targetUserId, targetUserInfo, activeConvId) => {
+            const existingPc = groupPeersRef.current.get(targetUserId);
+            if (existingPc) {
+                try {
+                    existingPc.close();
+                } catch (e) {
+                    console.error("Close existing group peer error:", e);
+                }
+            }
+
+            const pc = new RTCPeerConnection(ICE_SERVERS);
+            groupPeersRef.current.set(targetUserId, pc);
+
+            pc.onicecandidate = (event) => {
+                if (event.candidate) {
+                    socket.emit("groupCall:signal", {
+                        targetUserId,
+                        conversationId: activeConvId || conversationId,
+                        signal: {
+                            type: "candidate",
+                            candidate: event.candidate,
+                        },
+                    });
+                }
+            };
+
+            pc.ontrack = (event) => {
+                const incomingStream =
+                    event.streams && event.streams[0]
+                        ? event.streams[0]
+                        : new MediaStream([event.track]);
+
+                setGroupRemoteStreams((prev) => ({
+                    ...prev,
+                    [targetUserId]: {
+                        user: targetUserInfo || { _id: targetUserId, name: "Participant" },
+                        stream: incomingStream,
+                    },
+                }));
+            };
+
+            if (localStreamRef.current) {
+                localStreamRef.current.getTracks().forEach((track) => {
+                    pc.addTrack(track, localStreamRef.current);
+                });
+            }
+
+            return pc;
+        },
+        [conversationId]
+    );
+
+    // Helper to acquire media stream with fallback
+    const acquireMediaStream = async (type) => {
+        try {
+            return await navigator.mediaDevices.getUserMedia({
+                audio: true,
+                video:
+                    type === "video"
+                        ? { width: { ideal: 1280 }, height: { ideal: 720 } }
+                        : false,
+            });
+        } catch (mediaErr) {
+            if (type === "video") {
+                console.warn(
+                    "Camera inaccessible, falling back to audio-only call:",
+                    mediaErr
+                );
+                setCallType("audio");
+                return await navigator.mediaDevices.getUserMedia({
+                    audio: true,
+                    video: false,
+                });
+            }
+            throw mediaErr;
+        }
+    };
+
+    // Start 1-on-1 Outgoing Call
     const startCall = async (targetUser, type = "video", convId = null) => {
         if (!targetUser || !targetUser._id || !socket.connected) return;
 
         try {
             cleanupCall();
             setCallType(type);
+            setIsGroupCall(false);
             setRemoteUser(targetUser);
             setConversationId(convId);
             setCallState("calling");
 
-            // Play outgoing tone
             playOutgoingRing();
 
-            // Request camera / microphone with fallback
-            let stream;
-            try {
-                stream = await navigator.mediaDevices.getUserMedia({
-                    audio: true,
-                    video: type === "video" ? { width: { ideal: 1280 }, height: { ideal: 720 } } : false,
-                });
-            } catch (mediaErr) {
-                if (type === "video") {
-                    console.warn("Camera inaccessible, falling back to audio-only call:", mediaErr);
-                    stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-                    setCallType("audio");
-                } else {
-                    throw mediaErr;
-                }
-            }
-
+            const stream = await acquireMediaStream(type);
             localStreamRef.current = stream;
             setLocalStream(stream);
 
-            // Signal intent to backend
             socket.emit("call:initiate", {
                 receiverId: targetUser._id,
                 callType: type,
@@ -217,46 +330,73 @@ export const CallProvider = ({ children }) => {
         }
     };
 
-    // Accept Incoming Call
+    // Start Group Audio / Video Call
+    const startGroupCall = async (conversation, type = "video") => {
+        if (!conversation || !conversation._id || !socket.connected) return;
+
+        try {
+            cleanupCall();
+            setCallType(type);
+            setIsGroupCall(true);
+            const groupData = {
+                _id: conversation._id,
+                name: conversation.groupName || conversation.name || "Group Call",
+                profilePicture: conversation.groupAvatar || conversation.profilePicture || "",
+                isGroup: true,
+            };
+            setGroupInfo(groupData);
+            setConversationId(conversation._id);
+            setCallState("connected");
+
+            const stream = await acquireMediaStream(type);
+            localStreamRef.current = stream;
+            setLocalStream(stream);
+
+            if (callTimerRef.current) clearInterval(callTimerRef.current);
+            callTimerRef.current = setInterval(() => {
+                setCallDuration((prev) => prev + 1);
+            }, 1000);
+
+            socket.emit("groupCall:initiate", {
+                conversationId: conversation._id,
+                callType: type,
+            });
+        } catch (err) {
+            console.error("Failed to start group call:", err);
+            cleanupCall();
+            alert("Could not access microphone or camera. Please check permissions.");
+        }
+    };
+
+    // Accept Incoming Call (Handles both 1-on-1 & Group Calls)
     const acceptCall = async () => {
-        if (!remoteUser || !socket.connected) return;
+        if (!socket.connected) return;
 
         try {
             stopAllCallSounds();
             setCallState("connected");
 
-            // Get local stream with fallback
-            let stream;
-            try {
-                stream = await navigator.mediaDevices.getUserMedia({
-                    audio: true,
-                    video: callType === "video" ? { width: { ideal: 1280 }, height: { ideal: 720 } } : false,
-                });
-            } catch (mediaErr) {
-                if (callType === "video") {
-                    console.warn("Camera inaccessible, falling back to audio-only call:", mediaErr);
-                    stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-                    setCallType("audio");
-                } else {
-                    throw mediaErr;
-                }
-            }
-
+            const stream = await acquireMediaStream(callType);
             localStreamRef.current = stream;
             setLocalStream(stream);
 
-            // Create peer connection
-            const pc = createPeerConnection(remoteUser._id);
-
-            // Start timer
+            if (callTimerRef.current) clearInterval(callTimerRef.current);
             callTimerRef.current = setInterval(() => {
                 setCallDuration((prev) => prev + 1);
             }, 1000);
 
-            // Notify caller that call was accepted
-            socket.emit("call:accept", {
-                callerId: remoteUser._id,
-            });
+            if (isGroupCall) {
+                socket.emit("groupCall:join", {
+                    conversationId,
+                    callType,
+                });
+            } else {
+                if (!remoteUser) return;
+                createPeerConnection(remoteUser._id);
+                socket.emit("call:accept", {
+                    callerId: remoteUser._id,
+                });
+            }
         } catch (err) {
             console.error("Accept call error:", err);
             cleanupCall();
@@ -264,8 +404,13 @@ export const CallProvider = ({ children }) => {
         }
     };
 
-    // Reject Call
+    // Reject Call (1-on-1 or Group)
     const rejectCall = (reason = "declined") => {
+        if (isGroupCall) {
+            cleanupCall();
+            return;
+        }
+
         if (remoteUser && socket.connected) {
             socket.emit("call:reject", {
                 callerId: remoteUser._id,
@@ -275,9 +420,18 @@ export const CallProvider = ({ children }) => {
         cleanupCall();
     };
 
-    // End / Hangup Call
+    // End / Hangup / Leave Call
     const endCall = () => {
         playEndCallTone();
+
+        if (isGroupCall && conversationId) {
+            socket.emit("groupCall:leave", {
+                conversationId,
+            });
+            cleanupCall();
+            return;
+        }
+
         if (remoteUser && socket.connected) {
             socket.emit("call:end", {
                 targetUserId: remoteUser._id,
@@ -314,11 +468,13 @@ export const CallProvider = ({ children }) => {
             socket.connect();
         }
 
-        // 1. Incoming Call Alert
+        // ==========================================
+        // 1-on-1 Call Handlers
+        // ==========================================
+
         const handleIncomingCall = (data) => {
             const { caller, callType: incomingType, conversationId: cId } = data;
 
-            // If already on a call, auto-reject with busy
             if (callState !== "idle") {
                 socket.emit("call:reject", {
                     callerId: caller._id,
@@ -327,6 +483,8 @@ export const CallProvider = ({ children }) => {
                 return;
             }
 
+            setIsGroupCall(false);
+            setGroupInfo(null);
             setRemoteUser(caller);
             setCallType(incomingType || "video");
             setConversationId(cId);
@@ -335,18 +493,15 @@ export const CallProvider = ({ children }) => {
             playIncomingRing();
         };
 
-        // 2. Outgoing Call Accepted by Remote Peer
         const handleCallAccepted = async () => {
             stopAllCallSounds();
             setCallState("connected");
 
-            // Start call duration timer
             if (callTimerRef.current) clearInterval(callTimerRef.current);
             callTimerRef.current = setInterval(() => {
                 setCallDuration((prev) => prev + 1);
             }, 1000);
 
-            // Initiator creates WebRTC Offer
             const currentRemote = remoteUserRef.current;
             if (!currentRemote) return;
 
@@ -368,7 +523,6 @@ export const CallProvider = ({ children }) => {
             }
         };
 
-        // 3. Outgoing Call Rejected or Busy
         const handleCallRejected = (data) => {
             playEndCallTone();
             alert(
@@ -379,39 +533,23 @@ export const CallProvider = ({ children }) => {
             cleanupCall();
         };
 
-        // 4. Remote User is Offline
         const handleUserOffline = () => {
             playEndCallTone();
             alert("User is currently offline.");
             cleanupCall();
         };
 
-        // 5. Remote Peer Ended Call
         const handleCallEnded = () => {
             playEndCallTone();
             cleanupCall();
         };
 
-        // Drain queued ICE candidates helper
-        const drainCandidates = async (peer) => {
-            while (candidateQueueRef.current.length > 0) {
-                const cand = candidateQueueRef.current.shift();
-                try {
-                    await peer.addIceCandidate(new RTCIceCandidate(cand));
-                } catch (err) {
-                    console.warn("Failed to add buffered ICE candidate:", err);
-                }
-            }
-        };
-
-        // 6. Handle WebRTC Signaling (Offer, Answer, ICE Candidates)
         const handleCallSignal = async (data) => {
             const { senderId, signal } = data;
             const pc = peerConnectionRef.current;
 
             try {
                 if (signal.type === "offer") {
-                    // Receiver receives offer, sets remote description & sends answer
                     const currentPc = pc || createPeerConnection(senderId);
                     await currentPc.setRemoteDescription(
                         new RTCSessionDescription(signal.offer)
@@ -429,7 +567,6 @@ export const CallProvider = ({ children }) => {
                         },
                     });
                 } else if (signal.type === "answer") {
-                    // Caller receives answer
                     if (pc) {
                         await pc.setRemoteDescription(
                             new RTCSessionDescription(signal.answer)
@@ -437,7 +574,6 @@ export const CallProvider = ({ children }) => {
                         await drainCandidates(pc);
                     }
                 } else if (signal.type === "candidate") {
-                    // Receive ICE candidate with race-condition buffer
                     if (pc && pc.remoteDescription && pc.remoteDescription.type) {
                         await pc.addIceCandidate(
                             new RTCIceCandidate(signal.candidate)
@@ -447,15 +583,164 @@ export const CallProvider = ({ children }) => {
                     }
                 }
             } catch (err) {
-                console.error("WebRTC signal handling error:", err);
+                console.error("WebRTC 1-on-1 signal handling error:", err);
             }
         };
 
-        // 7. Real-time call history sync
+        // ==========================================
+        // Group Call Handlers (Mesh WebRTC)
+        // ==========================================
+
+        const handleGroupCallIncoming = (data) => {
+            const { caller, group, callType: incomingType, conversationId: cId } = data;
+
+            if (callState !== "idle") {
+                return; // already on call
+            }
+
+            setIsGroupCall(true);
+            setGroupInfo(group);
+            setRemoteUser(caller);
+            setCallType(incomingType || "video");
+            setConversationId(cId);
+            setCallState("incoming");
+
+            playIncomingRing();
+        };
+
+        const handleGroupCallStarted = (data) => {
+            const { group, participants } = data;
+            if (group) setGroupInfo(group);
+            if (participants) setGroupParticipants(participants);
+        };
+
+        const handleGroupCallJoined = async (data) => {
+            const { group, existingParticipants, callType: cType, conversationId: cId } = data;
+            if (group) setGroupInfo(group);
+            if (cType) setCallType(cType);
+
+            // Connect to each existing participant by creating an Offer
+            for (const participant of existingParticipants || []) {
+                const targetId = (participant._id || participant).toString();
+                const pc = createGroupPeerConnection(targetId, participant, cId || conversationId);
+
+                try {
+                    const offer = await pc.createOffer();
+                    await pc.setLocalDescription(offer);
+
+                    socket.emit("groupCall:signal", {
+                        targetUserId: targetId,
+                        conversationId: cId || conversationId,
+                        signal: {
+                            type: "offer",
+                            offer,
+                        },
+                    });
+                } catch (err) {
+                    console.error("Group call create offer error for peer:", targetId, err);
+                }
+            }
+        };
+
+        const handleGroupCallUserJoined = (data) => {
+            const { user: newUser } = data;
+            if (newUser) {
+                setGroupParticipants((prev) => {
+                    const exists = prev.some((p) => p._id.toString() === newUser._id.toString());
+                    return exists ? prev : [...prev, newUser];
+                });
+            }
+        };
+
+        const handleGroupCallSignal = async (data) => {
+            const { senderId, senderUser, conversationId: cId, signal } = data;
+            if (!senderId || !signal) return;
+
+            let pc = groupPeersRef.current.get(senderId);
+
+            try {
+                if (signal.type === "offer") {
+                    if (!pc) {
+                        pc = createGroupPeerConnection(senderId, senderUser, cId);
+                    }
+                    await pc.setRemoteDescription(new RTCSessionDescription(signal.offer));
+                    await drainGroupCandidates(pc, senderId);
+
+                    const answer = await pc.createAnswer();
+                    await pc.setLocalDescription(answer);
+
+                    socket.emit("groupCall:signal", {
+                        targetUserId: senderId,
+                        conversationId: cId,
+                        signal: {
+                            type: "answer",
+                            answer,
+                        },
+                    });
+                } else if (signal.type === "answer") {
+                    if (pc) {
+                        await pc.setRemoteDescription(new RTCSessionDescription(signal.answer));
+                        await drainGroupCandidates(pc, senderId);
+                    }
+                } else if (signal.type === "candidate") {
+                    if (pc && pc.remoteDescription && pc.remoteDescription.type) {
+                        await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
+                    } else {
+                        const q = groupQueuesRef.current.get(senderId) || [];
+                        q.push(signal.candidate);
+                        groupQueuesRef.current.set(senderId, q);
+                    }
+                }
+            } catch (err) {
+                console.error("Group signal error for peer:", senderId, err);
+            }
+        };
+
+        const handleGroupCallUserLeft = (data) => {
+            const { userId: leftUserId } = data;
+            if (!leftUserId) return;
+
+            // Close and remove peer connection
+            const pc = groupPeersRef.current.get(leftUserId);
+            if (pc) {
+                try {
+                    pc.close();
+                } catch (e) {
+                    console.error("Close left user PC error:", e);
+                }
+                groupPeersRef.current.delete(leftUserId);
+                groupQueuesRef.current.delete(leftUserId);
+            }
+
+            // Remove stream
+            setGroupRemoteStreams((prev) => {
+                const next = { ...prev };
+                delete next[leftUserId];
+                return next;
+            });
+
+            // Remove from participants
+            setGroupParticipants((prev) =>
+                prev.filter((p) => p._id.toString() !== leftUserId.toString())
+            );
+        };
+
+        // Real-time call history sync
         const handleNewCallRecord = (callDoc) => {
             if (!callDoc?._id || !user?._id) return;
             const isCaller = (callDoc.caller?._id || callDoc.caller) === user._id;
-            const contactUser = isCaller ? callDoc.receiver : callDoc.caller;
+            let contactUser;
+
+            if (callDoc.isGroupCall) {
+                contactUser = {
+                    _id: callDoc.conversation?._id || callDoc._id,
+                    name: callDoc.conversation?.groupName || "Group Call",
+                    profilePicture: callDoc.conversation?.groupAvatar || "",
+                    isGroup: true,
+                };
+            } else {
+                contactUser = isCaller ? callDoc.receiver : callDoc.caller;
+            }
 
             let directionStatus = callDoc.status;
             if (callDoc.status === "completed" || callDoc.status === "rejected") {
@@ -469,6 +754,7 @@ export const CallProvider = ({ children }) => {
                 _id: callDoc._id.toString(),
                 user: contactUser || { name: "Unknown", phone: "", profilePicture: "" },
                 isCaller,
+                isGroupCall: Boolean(callDoc.isGroupCall),
                 callType: callDoc.callType || "video",
                 status: directionStatus,
                 originalStatus: callDoc.status,
@@ -491,6 +777,13 @@ export const CallProvider = ({ children }) => {
         socket.on("call:signal", handleCallSignal);
         socket.on("call:newRecord", handleNewCallRecord);
 
+        socket.on("groupCall:incoming", handleGroupCallIncoming);
+        socket.on("groupCall:started", handleGroupCallStarted);
+        socket.on("groupCall:joined", handleGroupCallJoined);
+        socket.on("groupCall:userJoined", handleGroupCallUserJoined);
+        socket.on("groupCall:signal", handleGroupCallSignal);
+        socket.on("groupCall:userLeft", handleGroupCallUserLeft);
+
         return () => {
             socket.off("call:incoming", handleIncomingCall);
             socket.off("call:accepted", handleCallAccepted);
@@ -499,13 +792,32 @@ export const CallProvider = ({ children }) => {
             socket.off("call:ended", handleCallEnded);
             socket.off("call:signal", handleCallSignal);
             socket.off("call:newRecord", handleNewCallRecord);
+
+            socket.off("groupCall:incoming", handleGroupCallIncoming);
+            socket.off("groupCall:started", handleGroupCallStarted);
+            socket.off("groupCall:joined", handleGroupCallJoined);
+            socket.off("groupCall:userJoined", handleGroupCallUserJoined);
+            socket.off("groupCall:signal", handleGroupCallSignal);
+            socket.off("groupCall:userLeft", handleGroupCallUserLeft);
         };
-    }, [user, callState, cleanupCall, createPeerConnection]);
+    }, [
+        user,
+        callState,
+        conversationId,
+        isGroupCall,
+        cleanupCall,
+        createPeerConnection,
+        createGroupPeerConnection,
+    ]);
 
     const value = {
         callState,
         callType,
         remoteUser,
+        isGroupCall,
+        groupInfo,
+        groupParticipants,
+        groupRemoteStreams,
         localStream,
         remoteStream,
         isMuted,
@@ -515,6 +827,7 @@ export const CallProvider = ({ children }) => {
         clearCallHistory,
         addCallRecord,
         startCall,
+        startGroupCall,
         acceptCall,
         rejectCall,
         endCall,

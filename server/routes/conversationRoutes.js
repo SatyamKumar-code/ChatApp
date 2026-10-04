@@ -9,6 +9,7 @@ import {
     togglePinConversation,
     togglePinMessage,
     toggleGroupAdmin,
+    deleteConversation,
 } from "../controllers/conversationController.js";
 import protect from "../middleware/authMiddleware.js";
 
@@ -34,6 +35,9 @@ router.delete("/group/:id/members/:memberId", protect, removeGroupMember);
 
 // Promote or demote group admin
 router.post("/group/:id/admins/:memberId", protect, toggleGroupAdmin);
+
+// Delete / Hide conversation for logged-in user
+router.delete("/:id", protect, deleteConversation);
 
 // Pin / Unpin conversation in sidebar
 router.post("/:conversationId/pin", protect, togglePinConversation);

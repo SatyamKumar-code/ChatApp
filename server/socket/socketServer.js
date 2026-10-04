@@ -9,6 +9,8 @@ import Call from "../models/Call.js";
 const onlineUsers = new Map();
 // Map<callPairKey, activeCallInfo>
 const activeCalls = new Map();
+// Map<conversationId, activeGroupCallInfo>
+const activeGroupCalls = new Map();
 
 const parseCookies = (cookieHeader) => {
   const cookies = {};
@@ -292,7 +294,15 @@ const setupSocket = (io) => {
             });
           }
 
-          receiverIsOnline = isUserOnline(receiverId.toString());
+          // Check if receiver has blocked current user
+          var isBlockedByReceiver = Boolean(
+            receiver?.blockedUsers &&
+            receiver.blockedUsers.some(
+              (bId) => (bId?._id || bId).toString() === userId
+            )
+          );
+
+          receiverIsOnline = !isBlockedByReceiver && isUserOnline(receiverId.toString());
         }
 
         const finalType = messageType || (fileUrl ? (fileUrl.startsWith("data:audio") ? "audio" : fileUrl.startsWith("data:image") ? "image" : "file") : "text");
@@ -310,19 +320,18 @@ const setupSocket = (io) => {
             fileSize: fileSize || 0,
             duration: duration || 0,
             replyTo: replyTo || null,
-            isDelivered: !conversation.isGroup ? receiverIsOnline : false,
+            isDelivered: !conversation.isGroup && !isBlockedByReceiver ? receiverIsOnline : false,
             isSeen: false,
             isForwarded: Boolean(isForwarded),
+            deletedFor: isBlockedByReceiver ? [receiverId] : [],
           });
 
-        // Update conversation
-        conversation.lastMessage =
-          message._id;
-
-        conversation.lastMessageAt =
-          new Date();
-
-        await conversation.save();
+        // Update conversation lastMessage only if receiver has not blocked sender
+        if (!isBlockedByReceiver) {
+          conversation.lastMessage = message._id;
+          conversation.lastMessageAt = new Date();
+          await conversation.save();
+        }
 
         // Populate message
         const populatedMessage =
@@ -358,30 +367,34 @@ const setupSocket = (io) => {
             );
           });
         } else {
+          // Always emit to sender so sender sees their own message
           io.to(`user:${userId}`).emit(
             "newMessage",
             populatedMessage
           );
 
-          io.to(
-            `user:${receiverId.toString()}`
-          ).emit(
-            "newMessage",
-            populatedMessage
-          );
-
-          if (receiverIsOnline) {
-            io.to(`user:${userId}`).emit(
-              "message:delivered",
-              {
-                messages: [
-                  {
-                    messageId: message._id.toString(),
-                    conversationId: conversationId,
-                  },
-                ],
-              }
+          // Emit to receiver ONLY if receiver has not blocked the sender
+          if (!isBlockedByReceiver) {
+            io.to(
+              `user:${receiverId.toString()}`
+            ).emit(
+              "newMessage",
+              populatedMessage
             );
+
+            if (receiverIsOnline) {
+              io.to(`user:${userId}`).emit(
+                "message:delivered",
+                {
+                  messages: [
+                    {
+                      messageId: message._id.toString(),
+                      conversationId: conversationId,
+                    },
+                  ],
+                }
+              );
+            }
           }
         }
 
@@ -662,9 +675,101 @@ const setupSocket = (io) => {
       }
     });
 
-    // ==============================
-    // WEBRTC CALL SIGNALING
-    // ==============================
+    // Helper to format call duration
+    const formatCallDuration = (seconds) => {
+      if (!seconds || seconds <= 0) return "";
+      const mins = Math.floor(seconds / 60);
+      const secs = seconds % 60;
+      if (mins === 0) return `${secs} sec`;
+      return `${mins} min ${secs} sec`;
+    };
+
+    // Helper to create and broadcast Call Message into Conversation
+    const createAndBroadcastCallMessage = async ({
+      conversationId: cId,
+      callerId,
+      receiverId = null,
+      callType = "video",
+      status = "completed",
+      duration = 0,
+      isGroupCall = false,
+    }) => {
+      try {
+        let targetConvId = cId;
+
+        // If no conversationId given for 1-on-1, lookup conversation
+        if (!targetConvId && callerId && receiverId) {
+          const found = await Conversation.findOne({
+            isGroup: false,
+            participants: { $all: [callerId, receiverId] },
+          });
+          if (found) targetConvId = found._id;
+        }
+
+        if (!targetConvId) return;
+
+        const conversation = await Conversation.findById(targetConvId);
+        if (!conversation) return;
+
+        const isVideo = callType === "video";
+        const typeLabel = isVideo ? "Video call" : "Audio call";
+        let messageText = "";
+
+        if (isGroupCall) {
+          const durationStr = formatCallDuration(duration);
+          messageText = durationStr
+            ? `Group ${typeLabel.toLowerCase()} • ${durationStr}`
+            : `Group ${typeLabel.toLowerCase()}`;
+        } else {
+          if (status === "missed") {
+            messageText = `Missed ${typeLabel.toLowerCase()}`;
+          } else if (status === "rejected") {
+            messageText = `Declined ${typeLabel.toLowerCase()}`;
+          } else if (duration > 0) {
+            messageText = `${typeLabel} • ${formatCallDuration(duration)}`;
+          } else {
+            messageText = typeLabel;
+          }
+        }
+
+        const message = await Message.create({
+          conversation: conversation._id,
+          sender: callerId,
+          receiver: receiverId || null,
+          text: messageText,
+          messageType: "call",
+          callDetails: {
+            callType,
+            status,
+            duration,
+            isGroupCall: Boolean(isGroupCall),
+          },
+          isDelivered: true,
+          isSeen: false,
+        });
+
+        conversation.lastMessage = message._id;
+        conversation.lastMessageAt = new Date();
+        await conversation.save();
+
+        const populated = await Message.findById(message._id)
+          .populate("sender", "name phone profilePicture isOnline")
+          .populate("receiver", "name phone profilePicture isOnline");
+
+        if (conversation.isGroup) {
+          conversation.participants.forEach((pId) => {
+            io.to(`user:${pId.toString()}`).emit("newMessage", populated);
+          });
+        } else {
+          io.to(`user:${callerId.toString()}`).emit("newMessage", populated);
+          if (receiverId) {
+            io.to(`user:${receiverId.toString()}`).emit("newMessage", populated);
+          }
+        }
+      } catch (err) {
+        console.error("Create call message error:", err);
+      }
+    };
 
     // Helper to get call pair key
     const getCallKey = (u1, u2) => {
@@ -677,6 +782,21 @@ const setupSocket = (io) => {
         const { receiverId, callType = "video", conversationId } = data;
 
         if (!receiverId) return;
+
+        // Check if caller or receiver has blocked the other
+        const [callerUser, receiverUser] = await Promise.all([
+          User.findById(userId),
+          User.findById(receiverId),
+        ]);
+
+        if (
+          callerUser?.blockedUsers?.some((b) => (b?._id || b).toString() === receiverId.toString()) ||
+          receiverUser?.blockedUsers?.some((b) => (b?._id || b).toString() === userId.toString())
+        ) {
+          return socket.emit("call:rejected", {
+            reason: "User is unavailable / blocked",
+          });
+        }
 
         const receiverOnline = isUserOnline(receiverId.toString());
 
@@ -698,6 +818,17 @@ const setupSocket = (io) => {
           } catch (e) {
             console.error("Save offline call error:", e);
           }
+
+          // Create missed call message in chat
+          createAndBroadcastCallMessage({
+            conversationId,
+            callerId: socket.user._id,
+            receiverId,
+            callType,
+            status: "missed",
+            duration: 0,
+            isGroupCall: false,
+          });
 
           return socket.emit("call:userOffline", {
             receiverId,
@@ -728,6 +859,7 @@ const setupSocket = (io) => {
           callerId: userId,
           receiverId: receiverId.toString(),
           callType,
+          conversationId,
           startTime: null,
         });
 
@@ -802,6 +934,18 @@ const setupSocket = (io) => {
             io.to(`user:${callerId.toString()}`).emit("call:newRecord", populated);
             io.to(`user:${userId}`).emit("call:newRecord", populated);
           }
+
+          // Broadcast Call message into Chat
+          createAndBroadcastCallMessage({
+            conversationId: callInfo.conversationId,
+            callerId: callInfo.callerId,
+            receiverId: callInfo.receiverId,
+            callType: callInfo.callType,
+            status: reason === "busy" ? "missed" : "rejected",
+            duration: 0,
+            isGroupCall: false,
+          });
+
           activeCalls.delete(callKey);
         }
 
@@ -848,6 +992,17 @@ const setupSocket = (io) => {
             }
           }
 
+          // Broadcast Call message into Chat
+          createAndBroadcastCallMessage({
+            conversationId: callInfo.conversationId,
+            callerId: callInfo.callerId,
+            receiverId: callInfo.receiverId,
+            callType: callInfo.callType,
+            status: callInfo.startTime ? "completed" : "missed",
+            duration,
+            isGroupCall: false,
+          });
+
           activeCalls.delete(callKey);
         }
 
@@ -873,6 +1028,295 @@ const setupSocket = (io) => {
     });
 
     // ==============================
+    // GROUP WEBRTC CALL SIGNALING
+    // ==============================
+
+    // Initiate or Start Group Call
+    socket.on("groupCall:initiate", async (data) => {
+      try {
+        const { conversationId, callType = "video" } = data;
+        if (!conversationId) return;
+
+        const conversation = await Conversation.findById(conversationId).populate(
+          "participants",
+          "name phone profilePicture isOnline"
+        );
+        if (!conversation || !conversation.isGroup) {
+          return socket.emit("groupCall:error", {
+            message: "Group conversation not found",
+          });
+        }
+
+        // Check if user is an active participant (has not left)
+        const userRecord = conversation.participantJoinedAt?.find(
+          (p) => p.user?.toString() === userId.toString()
+        );
+        if (userRecord && userRecord.leftAt) {
+          return socket.emit("groupCall:error", {
+            message: "You are no longer in this group",
+          });
+        }
+
+        let groupCall = activeGroupCalls.get(conversationId.toString());
+
+        if (!groupCall) {
+          // Create Call document in DB
+          let callDocId = null;
+          try {
+            const callDoc = await Call.create({
+              caller: socket.user._id,
+              isGroupCall: true,
+              groupParticipants: [socket.user._id],
+              callType,
+              status: "completed",
+              duration: 0,
+              conversation: conversation._id,
+            });
+            callDocId = callDoc._id;
+          } catch (e) {
+            console.error("Create group call DB record error:", e);
+          }
+
+          groupCall = {
+            conversationId: conversationId.toString(),
+            groupName: conversation.groupName,
+            groupAvatar: conversation.groupAvatar,
+            callType,
+            caller: {
+              _id: socket.user._id,
+              name: socket.user.name,
+              profilePicture: socket.user.profilePicture,
+              phone: socket.user.phone,
+            },
+            participants: new Map(),
+            startedAt: Date.now(),
+            callDocId,
+          };
+
+          activeGroupCalls.set(conversationId.toString(), groupCall);
+        }
+
+        const callerInfo = {
+          _id: socket.user._id,
+          name: socket.user.name,
+          profilePicture: socket.user.profilePicture,
+          phone: socket.user.phone,
+        };
+
+        // Add caller to participants
+        groupCall.participants.set(userId.toString(), callerInfo);
+
+        // Notify caller that call is initialized
+        socket.emit("groupCall:started", {
+          conversationId: conversationId.toString(),
+          group: {
+            _id: conversation._id,
+            name: conversation.groupName,
+            profilePicture: conversation.groupAvatar,
+            isGroup: true,
+          },
+          callType,
+          participants: Array.from(groupCall.participants.values()),
+        });
+
+        // Send incoming call alert to all other group participants
+        conversation.participants.forEach((p) => {
+          const pId = (p._id || p).toString();
+          if (pId !== userId.toString() && !groupCall.participants.has(pId)) {
+            io.to(`user:${pId}`).emit("groupCall:incoming", {
+              caller: callerInfo,
+              group: {
+                _id: conversation._id,
+                name: conversation.groupName,
+                profilePicture: conversation.groupAvatar,
+                isGroup: true,
+              },
+              callType,
+              conversationId: conversationId.toString(),
+            });
+          }
+        });
+
+        console.log(
+          `Group call initiated by ${socket.user.name} in group "${conversation.groupName}" (${callType})`
+        );
+      } catch (err) {
+        console.error("Group call initiate error:", err);
+      }
+    });
+
+    // Join Group Call
+    socket.on("groupCall:join", async (data) => {
+      try {
+        const { conversationId, callType = "video" } = data;
+        if (!conversationId) return;
+
+        let groupCall = activeGroupCalls.get(conversationId.toString());
+
+        // If no active call, auto-create it
+        if (!groupCall) {
+          const conversation = await Conversation.findById(conversationId);
+          if (!conversation || !conversation.isGroup) return;
+
+          let callDocId = null;
+          try {
+            const callDoc = await Call.create({
+              caller: socket.user._id,
+              isGroupCall: true,
+              groupParticipants: [socket.user._id],
+              callType,
+              status: "completed",
+              duration: 0,
+              conversation: conversation._id,
+            });
+            callDocId = callDoc._id;
+          } catch (e) {
+            console.error("Create group call DB record error:", e);
+          }
+
+          groupCall = {
+            conversationId: conversationId.toString(),
+            groupName: conversation.groupName,
+            groupAvatar: conversation.groupAvatar,
+            callType,
+            caller: {
+              _id: socket.user._id,
+              name: socket.user.name,
+              profilePicture: socket.user.profilePicture,
+              phone: socket.user.phone,
+            },
+            participants: new Map(),
+            startedAt: Date.now(),
+            callDocId,
+          };
+
+          activeGroupCalls.set(conversationId.toString(), groupCall);
+        }
+
+        const userInfo = {
+          _id: socket.user._id,
+          name: socket.user.name,
+          profilePicture: socket.user.profilePicture,
+          phone: socket.user.phone,
+        };
+
+        const existingParticipants = Array.from(
+          groupCall.participants.values()
+        ).filter((p) => p._id.toString() !== userId.toString());
+
+        groupCall.participants.set(userId.toString(), userInfo);
+
+        if (groupCall.callDocId) {
+          try {
+            await Call.findByIdAndUpdate(groupCall.callDocId, {
+              $addToSet: { groupParticipants: socket.user._id },
+            });
+          } catch (e) {
+            console.error("Update group call participants DB error:", e);
+          }
+        }
+
+        // Send existing participants list to the joining user
+        socket.emit("groupCall:joined", {
+          conversationId: conversationId.toString(),
+          group: {
+            _id: conversationId,
+            name: groupCall.groupName,
+            profilePicture: groupCall.groupAvatar,
+            isGroup: true,
+          },
+          callType: groupCall.callType,
+          existingParticipants,
+        });
+
+        // Notify each existing participant about the new participant
+        existingParticipants.forEach((p) => {
+          io.to(`user:${p._id.toString()}`).emit("groupCall:userJoined", {
+            conversationId: conversationId.toString(),
+            user: userInfo,
+          });
+        });
+
+        console.log(
+          `User ${socket.user.name} joined group call in "${groupCall.groupName}"`
+        );
+      } catch (err) {
+        console.error("Group call join error:", err);
+      }
+    });
+
+    // Relay Group WebRTC Signals (Offer, Answer, ICE Candidates)
+    socket.on("groupCall:signal", (data) => {
+      const { targetUserId, conversationId, signal } = data;
+      if (!targetUserId || !signal) return;
+
+      io.to(`user:${targetUserId.toString()}`).emit("groupCall:signal", {
+        senderId: socket.user._id.toString(),
+        senderUser: {
+          _id: socket.user._id,
+          name: socket.user.name,
+          profilePicture: socket.user.profilePicture,
+          phone: socket.user.phone,
+        },
+        conversationId,
+        signal,
+      });
+    });
+
+    // Leave Group Call
+    socket.on("groupCall:leave", async (data) => {
+      try {
+        const { conversationId } = data || {};
+        if (!conversationId) return;
+
+        const groupCall = activeGroupCalls.get(conversationId.toString());
+        if (groupCall) {
+          groupCall.participants.delete(userId.toString());
+
+          // Notify other participants
+          groupCall.participants.forEach((p) => {
+            io.to(`user:${p._id.toString()}`).emit("groupCall:userLeft", {
+              conversationId: conversationId.toString(),
+              userId: userId.toString(),
+            });
+          });
+
+          // If no one is left in the group call, close it
+          if (groupCall.participants.size === 0) {
+            const duration = Math.max(
+              1,
+              Math.floor((Date.now() - groupCall.startedAt) / 1000)
+            );
+            if (groupCall.callDocId) {
+              try {
+                await Call.findByIdAndUpdate(groupCall.callDocId, {
+                  duration,
+                  status: "completed",
+                });
+              } catch (e) {
+                console.error("Save group call final duration error:", e);
+              }
+            }
+
+            // Create Group Call message in chat
+            createAndBroadcastCallMessage({
+              conversationId: groupCall.conversationId,
+              callerId: groupCall.caller._id,
+              callType: groupCall.callType,
+              status: "completed",
+              duration,
+              isGroupCall: true,
+            });
+
+            activeGroupCalls.delete(conversationId.toString());
+          }
+        }
+      } catch (err) {
+        console.error("Group call leave error:", err);
+      }
+    });
+
+    // ==============================
     // DISCONNECT
     // ==============================
 
@@ -880,6 +1324,49 @@ const setupSocket = (io) => {
       console.log(
         `Socket disconnected: ${socket.user.name} (${userId}) [${socket.id}]`
       );
+
+      // Clean up user from any active group calls
+      for (const [convId, groupCall] of activeGroupCalls.entries()) {
+        if (groupCall.participants.has(userId.toString())) {
+          groupCall.participants.delete(userId.toString());
+
+          groupCall.participants.forEach((p) => {
+            io.to(`user:${p._id.toString()}`).emit("groupCall:userLeft", {
+              conversationId: convId,
+              userId: userId.toString(),
+            });
+          });
+
+          if (groupCall.participants.size === 0) {
+            const duration = Math.max(
+              1,
+              Math.floor((Date.now() - groupCall.startedAt) / 1000)
+            );
+            if (groupCall.callDocId) {
+              try {
+                await Call.findByIdAndUpdate(groupCall.callDocId, {
+                  duration,
+                  status: "completed",
+                });
+              } catch (e) {
+                console.error("Save group call final duration error:", e);
+              }
+            }
+
+            // Create Group Call message in chat
+            createAndBroadcastCallMessage({
+              conversationId: groupCall.conversationId,
+              callerId: groupCall.caller._id,
+              callType: groupCall.callType,
+              status: "completed",
+              duration,
+              isGroupCall: true,
+            });
+
+            activeGroupCalls.delete(convId);
+          }
+        }
+      }
 
       // Remove this specific socket from the user's set
       const userSockets = onlineUsers.get(userId);

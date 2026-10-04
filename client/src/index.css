@@ -1,6 +1,143 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 @import "tailwindcss";
 
+:root {
+  --bg-app: #0a0a14;
+  --bg-rail: #0c0c18;
+  --bg-sidebar: #0f0f1c;
+  --bg-chat: #0a0a14;
+  --bg-card: #181830;
+  --bg-card-subtle: #121224;
+  --bg-input: #181830;
+  --bg-hover: rgba(255, 255, 255, 0.05);
+  --border-color: rgba(255, 255, 255, 0.07);
+  --text-primary: #f4f4f7;
+  --text-secondary: #9494a8;
+  --text-muted: #66667d;
+  --bubble-incoming: #181830;
+  --bubble-incoming-text: #f0f0f5;
+  --modal-bg: #121224;
+  --modal-header: #16162e;
+}
+
+html.light,
+html[data-theme="light"] {
+  --bg-app: #bac2cc;
+  --bg-rail: #9fa9b5;
+  --bg-sidebar: #bcc5cf;
+  --bg-chat: #b0b9c4;
+  --bg-card: #cad2dc;
+  --bg-card-subtle: #b6c0cb;
+  --bg-input: #aeb8c4;
+  --bg-hover: rgba(0, 0, 0, 0.1);
+  --border-color: rgba(0, 0, 0, 0.16);
+  --text-primary: #000000;
+  --text-secondary: #1a202c;
+  --text-muted: #2d3748;
+  --bubble-incoming: #cad3dd;
+  --bubble-incoming-text: #000000;
+  --modal-bg: #c4cdd8;
+  --modal-header: #b5bfcb;
+}
+
+/* Light mode overrides for smooth instant adaptation across elements */
+html.light body {
+  background-color: var(--bg-app) !important;
+  color: var(--text-primary) !important;
+}
+
+html.light .bg-\[\#0a0a14\],
+html.light .bg-\[\#0a0a16\] {
+  background-color: var(--bg-app) !important;
+}
+
+html.light .bg-\[\#0c0c18\],
+html.light .bg-\[\#0c0c1a\] {
+  background-color: var(--bg-rail) !important;
+}
+
+html.light .bg-\[\#0f0f1c\],
+html.light .bg-\[\#111124\],
+html.light .bg-\[\#121224\] {
+  background-color: var(--bg-sidebar) !important;
+}
+
+html.light .bg-\[\#16162a\],
+html.light .bg-\[\#16162c\],
+html.light .bg-\[\#16162e\],
+html.light .bg-\[\#181830\],
+html.light .bg-\[\#181832\],
+html.light .bg-\[\#1e1e35\],
+html.light .bg-\[\#151528\],
+html.light .bg-\[\#141426\] {
+  background-color: var(--bg-card) !important;
+  color: var(--text-primary) !important;
+}
+
+/* Light mode chat item selection */
+html.light .group.border-l-3.bg-\[\#181830\] {
+  background-color: #aeb8c4 !important;
+}
+
+html.light input,
+html.light textarea {
+  color: #000000 !important;
+  font-weight: 500;
+}
+
+html.light input::placeholder,
+html.light textarea::placeholder {
+  color: #374151 !important;
+}
+
+html.light .text-white {
+  color: #000000 !important;
+}
+
+html.light .text-zinc-100,
+html.light .text-zinc-200 {
+  color: #050505 !important;
+}
+
+html.light .text-zinc-300,
+html.light .text-zinc-400 {
+  color: #1a202c !important;
+}
+
+html.light .text-zinc-500 {
+  color: #2d3748 !important;
+}
+
+html.light .border-white\/5,
+html.light .border-white\/10,
+html.light .border-white\/20,
+html.light .divide-white\/5,
+html.light .divide-white\/10 {
+  border-color: rgba(0, 0, 0, 0.14) !important;
+}
+
+html.light .hover\:bg-white\/5:hover,
+html.light .hover\:bg-white\/10:hover,
+html.light .hover\:bg-white\/\[0\.03\]:hover {
+  background-color: rgba(0, 0, 0, 0.08) !important;
+}
+
+html.light .bg-white\/5 {
+  background-color: rgba(0, 0, 0, 0.05) !important;
+}
+
+html.light .bg-white\/10 {
+  background-color: rgba(0, 0, 0, 0.09) !important;
+}
+
+html.light ::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.25) !important;
+}
+
+html.light ::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.4) !important;
+}
+
 @layer base {
   html,
   body,
@@ -12,10 +149,11 @@
 
   body {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    background-color: #0a0a14;
-    color: #f0f0f5;
+    background-color: var(--bg-app);
+    color: var(--text-primary);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    transition: background-color 0.25s ease, color 0.25s ease;
   }
 }
 

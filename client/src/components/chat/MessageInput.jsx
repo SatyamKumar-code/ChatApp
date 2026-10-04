@@ -259,8 +259,8 @@ export const MessageInput = ({ onSendMessage, onTyping, onStopTyping, disabled =
 
     if (disabledReason) {
         return (
-            <div className="p-4 bg-[#0d0d1c] border-t border-white/5 flex items-center justify-center select-none animate-in fade-in duration-200">
-                <div className="inline-flex items-center gap-2.5 px-4 py-2.5 rounded-2xl bg-[#151528] border border-white/10 text-zinc-400 text-xs font-medium shadow-inner">
+            <div className="p-4 bg-[#0d0d1c]/60 backdrop-blur-md border-t border-white/5 flex items-center justify-center select-none animate-in fade-in duration-200">
+                <div className="inline-flex items-center gap-2.5 px-4 py-2.5 rounded-2xl bg-[#151528]/80 backdrop-blur-sm border border-white/10 text-zinc-400 text-xs font-medium shadow-inner">
                     <svg
                         xmlns="http://www.w3.org/2000/svg"
                         className="w-4 h-4 text-purple-400 shrink-0"
@@ -282,7 +282,7 @@ export const MessageInput = ({ onSendMessage, onTyping, onStopTyping, disabled =
     }
 
     return (
-        <div className="p-3 md:p-4 bg-[#0f0f1c] border-t border-white/5 relative">
+        <div className="p-3 md:p-4 relative">
             {/* Replying Preview Banner */}
             {replyingTo && (
                 <div className="mb-2.5 flex items-center justify-between p-2.5 rounded-xl bg-[#181832] border border-purple-500/30 border-l-4 border-l-purple-500 shadow-sm animate-in fade-in slide-in-from-bottom-2 duration-150">
@@ -551,7 +551,7 @@ export const MessageInput = ({ onSendMessage, onTyping, onStopTyping, disabled =
                     </button>
 
                     {/* Input Area */}
-                    <div className="flex-1 relative flex items-center bg-[#181830] rounded-2xl border border-white/5 focus-within:border-purple-500/50 focus-within:bg-[#1c1c38] transition-all px-3.5 py-1">
+                    <div className="flex-1 relative flex items-center bg-[#181830]/80 backdrop-blur-sm rounded-2xl border border-white/10 focus-within:border-purple-500/50 focus-within:bg-[#1c1c38]/90 transition-all px-3.5 py-1">
                         <input
                             ref={inputRef}
                             type="text"

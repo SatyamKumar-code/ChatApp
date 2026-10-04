@@ -11,9 +11,19 @@ const callSchema = new mongoose.Schema(
         receiver: {
             type: mongoose.Schema.Types.ObjectId,
             ref: "User",
-            required: true,
+            required: false,
             index: true,
         },
+        isGroupCall: {
+            type: Boolean,
+            default: false,
+        },
+        groupParticipants: [
+            {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: "User",
+            },
+        ],
         callType: {
             type: String,
             enum: ["audio", "video"],

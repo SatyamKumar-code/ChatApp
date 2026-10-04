@@ -10,6 +10,37 @@ const conversationSchema = new mongoose.Schema(
       },
     ],
 
+    participantJoinedAt: [
+      {
+        user: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "User",
+        },
+        joinedAt: {
+          type: Date,
+          default: Date.now,
+        },
+        leftAt: {
+          type: Date,
+          default: null,
+        },
+      },
+    ],
+
+    pastParticipants: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
+
+    hiddenFor: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
+
     lastMessage: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Message",

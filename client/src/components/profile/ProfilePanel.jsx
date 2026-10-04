@@ -19,11 +19,15 @@ export const ProfilePanel = ({
         searchUsers,
         addGroupMembers,
         leaveOrRemoveGroupMember,
+        deleteConversation,
         updateGroup,
         toggleGroupAdmin,
+        toggleBlockUser,
+        isUserBlocked,
     } = useContext(ChatContext);
 
     const isGroup = partner?.isGroup || conversation?.isGroup;
+    const isLeftGroup = isGroup && Boolean(conversation?.isLeft || partner?.isLeft);
     const participants =
         conversation?.participants || partner?.participants || [];
     const groupAdminId =
@@ -38,6 +42,7 @@ export const ProfilePanel = ({
         [];
 
     const isGroupOwner = Boolean(
+        !isLeftGroup &&
         groupAdminId &&
         user?._id &&
         (groupAdminId._id || groupAdminId).toString() === user._id.toString()
@@ -45,6 +50,7 @@ export const ProfilePanel = ({
 
     const isCurrentUserAdmin =
         isGroup &&
+        !isLeftGroup &&
         (isGroupOwner ||
             groupAdminsList.some(
                 (a) => (a?._id || a)?.toString() === user?._id?.toString()
@@ -56,8 +62,8 @@ export const ProfilePanel = ({
         onlyAdminsCanAddMembers: false,
     };
 
-    const canEditGroupInfo = isGroup && (isCurrentUserAdmin || !groupSettings.onlyAdminsCanEditInfo);
-    const canAddMembers = isGroup && (isCurrentUserAdmin || !groupSettings.onlyAdminsCanAddMembers);
+    const canEditGroupInfo = isGroup && !isLeftGroup && (isCurrentUserAdmin || !groupSettings.onlyAdminsCanEditInfo);
+    const canAddMembers = isGroup && !isLeftGroup && (isCurrentUserAdmin || !groupSettings.onlyAdminsCanAddMembers);
 
     // Group editing state
     const [isEditingGroup, setIsEditingGroup] = useState(false);
@@ -266,8 +272,26 @@ export const ProfilePanel = ({
         }
     };
 
-    const handleLeaveGroup = async () => {
+    const handleLeaveOrDeleteGroup = async () => {
         if (!conversation?._id) return;
+        if (isLeftGroup) {
+            const confirmDelete = window.confirm(
+                "Are you sure you want to delete this group chat history?"
+            );
+            if (!confirmDelete) return;
+            try {
+                setIsActionLoading(true);
+                await deleteConversation(conversation._id);
+                onClose?.();
+            } catch (err) {
+                console.error("Failed to delete group:", err);
+                alert(err.response?.data?.message || "Failed to delete group");
+            } finally {
+                setIsActionLoading(false);
+            }
+            return;
+        }
+
         const confirmLeave = window.confirm(
             "Are you sure you want to leave this group?"
         );
@@ -276,7 +300,6 @@ export const ProfilePanel = ({
         try {
             setIsActionLoading(true);
             await leaveOrRemoveGroupMember(conversation._id, user._id);
-            onClose?.();
         } catch (err) {
             console.error("Failed to leave group:", err);
             alert(err.response?.data?.message || "Failed to leave group");
@@ -555,7 +578,11 @@ export const ProfilePanel = ({
                                             <p className="text-xs text-purple-300 font-medium">
                                                 {participants.length} group participants
                                             </p>
-                                            {canEditGroupInfo && (
+                                            {isLeftGroup ? (
+                                                <span className="text-xs text-rose-400 font-medium">
+                                                    You are no longer a participant
+                                                </span>
+                                            ) : canEditGroupInfo ? (
                                                 <button
                                                     type="button"
                                                     onClick={handleStartEditGroup}
@@ -577,7 +604,7 @@ export const ProfilePanel = ({
                                                     </svg>
                                                     <span>Edit Group</span>
                                                 </button>
-                                            )}
+                                            ) : null}
                                         </div>
                                     ) : (
                                         <>
@@ -966,30 +993,52 @@ export const ProfilePanel = ({
                             </div>
                         )}
 
-                        {/* Leave / Block Action */}
+                        {/* Leave / Block / Delete Action */}
                         <div className="pt-2">
                             {isGroup ? (
                                 <button
                                     type="button"
-                                    onClick={handleLeaveGroup}
+                                    onClick={handleLeaveOrDeleteGroup}
                                     disabled={isActionLoading}
                                     className="w-full px-4 py-2.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-xs font-semibold border border-rose-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer"
                                 >
-                                    <svg
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        className="w-4 h-4"
-                                        fill="none"
-                                        viewBox="0 0 24 24"
-                                        stroke="currentColor"
-                                    >
-                                        <path
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                            strokeWidth={2}
-                                            d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
-                                        />
-                                    </svg>
-                                    Leave Group
+                                    {isLeftGroup ? (
+                                        <>
+                                            <svg
+                                                xmlns="http://www.w3.org/2000/svg"
+                                                className="w-4 h-4"
+                                                fill="none"
+                                                viewBox="0 0 24 24"
+                                                stroke="currentColor"
+                                            >
+                                                <path
+                                                    strokeLinecap="round"
+                                                    strokeLinejoin="round"
+                                                    strokeWidth={2}
+                                                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                                                />
+                                            </svg>
+                                            Delete Group
+                                        </>
+                                    ) : (
+                                        <>
+                                            <svg
+                                                xmlns="http://www.w3.org/2000/svg"
+                                                className="w-4 h-4"
+                                                fill="none"
+                                                viewBox="0 0 24 24"
+                                                stroke="currentColor"
+                                            >
+                                                <path
+                                                    strokeLinecap="round"
+                                                    strokeLinejoin="round"
+                                                    strokeWidth={2}
+                                                    d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
+                                                />
+                                            </svg>
+                                            Leave Group
+                                        </>
+                                    )}
                                 </button>
                             ) : (
                                 <div className="space-y-3">
@@ -1012,26 +1061,56 @@ export const ProfilePanel = ({
                                         </button>
                                     </div>
 
-                                    <button
-                                        type="button"
-                                        className="w-full px-4 py-2.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-xs font-semibold border border-rose-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer"
-                                    >
-                                        <svg
-                                            xmlns="http://www.w3.org/2000/svg"
-                                            className="w-4 h-4"
-                                            fill="none"
-                                            viewBox="0 0 24 24"
-                                            stroke="currentColor"
-                                        >
-                                            <path
-                                                strokeLinecap="round"
-                                                strokeLinejoin="round"
-                                                strokeWidth={2}
-                                                d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"
-                                            />
-                                        </svg>
-                                        Block Contact
-                                    </button>
+                                    {(() => {
+                                        const partnerUserId = partner?._id?.toString();
+                                        const isBlocked = partnerUserId && isUserBlocked?.(partnerUserId);
+
+                                        return (
+                                            <button
+                                                type="button"
+                                                disabled={isActionLoading}
+                                                onClick={async () => {
+                                                    if (!partnerUserId) return;
+                                                    const actionText = isBlocked ? "unblock" : "block";
+                                                    const confirmAction = window.confirm(
+                                                        `Are you sure you want to ${actionText} ${partner.name || "this contact"}?`
+                                                    );
+                                                    if (!confirmAction) return;
+
+                                                    try {
+                                                        setIsActionLoading(true);
+                                                        await toggleBlockUser(partnerUserId);
+                                                    } catch (err) {
+                                                        console.error("Failed to toggle block:", err);
+                                                        alert(err.response?.data?.message || "Failed to update block status");
+                                                    } finally {
+                                                        setIsActionLoading(false);
+                                                    }
+                                                }}
+                                                className={`w-full px-4 py-2.5 rounded-xl text-xs font-semibold border transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                                                    isBlocked
+                                                        ? "bg-purple-600/15 hover:bg-purple-600/25 text-purple-300 border-purple-500/30"
+                                                        : "bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border-rose-500/20"
+                                                }`}
+                                            >
+                                                <svg
+                                                    xmlns="http://www.w3.org/2000/svg"
+                                                    className="w-4 h-4"
+                                                    fill="none"
+                                                    viewBox="0 0 24 24"
+                                                    stroke="currentColor"
+                                                >
+                                                    <path
+                                                        strokeLinecap="round"
+                                                        strokeLinejoin="round"
+                                                        strokeWidth={2}
+                                                        d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"
+                                                    />
+                                                </svg>
+                                                {isBlocked ? "Unblock Contact" : "Block Contact"}
+                                            </button>
+                                        );
+                                    })()}
                                 </div>
                             )}
                         </div>

@@ -1,11 +1,13 @@
 import React, { useContext, useState } from "react";
 import { AuthContext } from "../../context/AuthContext";
+import { useTheme, THEME_MODES } from "../../context/ThemeContext";
 import Modal from "../common/Modal";
 import ProfilePhotoUpload from "./ProfilePhotoUpload";
 import { playMessageSound } from "../../utils/callSounds";
 
 export const SettingsModal = ({ isOpen, onClose }) => {
     const { user, updateProfile, logout } = useContext(AuthContext);
+    const { themeMode, changeThemeMode, resolvedTheme } = useTheme();
 
     // Active tab
     const [activeTab, setActiveTab] = useState("profile");
@@ -389,7 +391,87 @@ export const SettingsModal = ({ isOpen, onClose }) => {
 
                     {/* ===== 2. APPEARANCE TAB ===== */}
                     {activeTab === "appearance" && (
-                        <div className="space-y-5">
+                        <div className="space-y-6">
+                            {/* Theme Mode: System, Dark, Light */}
+                            <div>
+                                <div className="flex items-center justify-between mb-3">
+                                    <h4 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
+                                        Interface Theme
+                                    </h4>
+                                    <span className="text-[11px] text-purple-400 font-medium">
+                                        {themeMode === THEME_MODES.SYSTEM
+                                            ? `System default (${resolvedTheme})`
+                                            : themeMode === THEME_MODES.LIGHT
+                                            ? "Light mode"
+                                            : "Dark mode"}
+                                    </span>
+                                </div>
+                                <div className="grid grid-cols-3 gap-2.5">
+                                    {/* System Mode (Default) */}
+                                    <button
+                                        type="button"
+                                        onClick={() => changeThemeMode(THEME_MODES.SYSTEM)}
+                                        className={`p-3 rounded-xl border flex flex-col items-center justify-center gap-2 transition-all cursor-pointer ${
+                                            themeMode === THEME_MODES.SYSTEM
+                                                ? "bg-purple-600/15 border-purple-500 shadow-md ring-1 ring-purple-500 text-purple-300 font-semibold"
+                                                : "bg-[#181830] border-white/5 hover:border-white/20 text-zinc-300"
+                                        }`}
+                                    >
+                                        <div className="w-8 h-8 rounded-lg bg-purple-500/20 flex items-center justify-center text-purple-400">
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                                            </svg>
+                                        </div>
+                                        <div className="text-center">
+                                            <p className="text-xs font-medium">System</p>
+                                            <p className="text-[10px] text-zinc-400">Default auto</p>
+                                        </div>
+                                    </button>
+
+                                    {/* Dark Mode */}
+                                    <button
+                                        type="button"
+                                        onClick={() => changeThemeMode(THEME_MODES.DARK)}
+                                        className={`p-3 rounded-xl border flex flex-col items-center justify-center gap-2 transition-all cursor-pointer ${
+                                            themeMode === THEME_MODES.DARK
+                                                ? "bg-purple-600/15 border-purple-500 shadow-md ring-1 ring-purple-500 text-purple-300 font-semibold"
+                                                : "bg-[#181830] border-white/5 hover:border-white/20 text-zinc-300"
+                                        }`}
+                                    >
+                                        <div className="w-8 h-8 rounded-lg bg-indigo-500/20 flex items-center justify-center text-indigo-400">
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+                                            </svg>
+                                        </div>
+                                        <div className="text-center">
+                                            <p className="text-xs font-medium">Dark</p>
+                                            <p className="text-[10px] text-zinc-400">Always dark</p>
+                                        </div>
+                                    </button>
+
+                                    {/* Light Mode */}
+                                    <button
+                                        type="button"
+                                        onClick={() => changeThemeMode(THEME_MODES.LIGHT)}
+                                        className={`p-3 rounded-xl border flex flex-col items-center justify-center gap-2 transition-all cursor-pointer ${
+                                            themeMode === THEME_MODES.LIGHT
+                                                ? "bg-purple-600/15 border-purple-500 shadow-md ring-1 ring-purple-500 text-purple-300 font-semibold"
+                                                : "bg-[#181830] border-white/5 hover:border-white/20 text-zinc-300"
+                                        }`}
+                                    >
+                                        <div className="w-8 h-8 rounded-lg bg-amber-500/20 flex items-center justify-center text-amber-400">
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+                                            </svg>
+                                        </div>
+                                        <div className="text-center">
+                                            <p className="text-xs font-medium">Light</p>
+                                            <p className="text-[10px] text-zinc-400">Always light</p>
+                                        </div>
+                                    </button>
+                                </div>
+                            </div>
+
                             <div>
                                 <h4 className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-3">
                                     Accent Color Theme

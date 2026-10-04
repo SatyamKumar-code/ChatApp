@@ -1,4 +1,5 @@
 import Status from "../models/Status.js";
+import User from "../models/User.js";
 
 /**
  * @desc    Create a new status update
@@ -36,10 +37,25 @@ export const createStatus = async (req, res) => {
             .populate("user", "name profilePicture phone isOnline")
             .populate("viewers.user", "name profilePicture phone");
 
-        // Broadcast to all connected sockets
+        // Broadcast only to users who have NOT blocked creator and whom creator has NOT blocked
         const io = req.app.get("io");
         if (io) {
-            io.emit("status:new", populatedStatus);
+            const creatorId = req.user._id;
+            const creator = await User.findById(creatorId).select("blockedUsers");
+            const creatorBlocked = (creator?.blockedUsers || []).map((id) => (id?._id || id).toString());
+
+            const usersWhoBlockedCreator = await User.find({
+                blockedUsers: creatorId,
+            }).select("_id");
+            const blockedCreator = usersWhoBlockedCreator.map((u) => u._id.toString());
+
+            const excludedSet = new Set([...creatorBlocked, ...blockedCreator]);
+
+            // Emit to each connected user room if not excluded
+            const allUsers = await User.find({ _id: { $nin: Array.from(excludedSet) } }).select("_id");
+            allUsers.forEach((u) => {
+                io.to(`user:${u._id.toString()}`).emit("status:new", populatedStatus);
+            });
         }
 
         return res.status(201).json({
@@ -64,9 +80,23 @@ export const createStatus = async (req, res) => {
 export const getStatuses = async (req, res) => {
     try {
         const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        const currentUserId = req.user._id;
+
+        // Find users whom current user blocked
+        const currentUser = await User.findById(currentUserId).select("blockedUsers");
+        const myBlockedUsers = (currentUser?.blockedUsers || []).map((id) => (id?._id || id).toString());
+
+        // Find users who have blocked current user
+        const usersWhoBlockedMe = await User.find({
+            blockedUsers: currentUserId,
+        }).select("_id");
+        const blockedByThem = usersWhoBlockedMe.map((u) => u._id.toString());
+
+        const excludedUserIds = Array.from(new Set([...myBlockedUsers, ...blockedByThem]));
 
         const statuses = await Status.find({
             createdAt: { $gte: cutoff },
+            user: { $nin: excludedUserIds },
         })
             .populate("user", "name profilePicture phone isOnline")
             .populate("viewers.user", "name profilePicture phone")
@@ -95,11 +125,19 @@ export const viewStatus = async (req, res) => {
         const { id } = req.params;
         const userId = req.user._id;
 
-        const status = await Status.findById(id);
+        const status = await Status.findById(id).populate("user", "blockedUsers");
         if (!status) {
             return res.status(404).json({
                 success: false,
                 message: "Status not found",
+            });
+        }
+
+        const authorBlocked = status.user?.blockedUsers || [];
+        if (authorBlocked.some((b) => (b?._id || b).toString() === userId.toString())) {
+            return res.status(403).json({
+                success: false,
+                message: "Access denied",
             });
         }
 

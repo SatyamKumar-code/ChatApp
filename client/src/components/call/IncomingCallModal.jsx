@@ -3,10 +3,22 @@ import { CallContext } from "../../context/CallContext";
 import Avatar from "../common/Avatar";
 
 export const IncomingCallModal = () => {
-    const { callState, callType, remoteUser, acceptCall, rejectCall } =
-        useContext(CallContext);
+    const {
+        callState,
+        callType,
+        remoteUser,
+        isGroupCall,
+        groupInfo,
+        acceptCall,
+        rejectCall,
+    } = useContext(CallContext);
 
-    if (callState !== "incoming" || !remoteUser) return null;
+    if (callState !== "incoming" || (!remoteUser && !groupInfo)) return null;
+
+    const displayName = isGroupCall ? groupInfo?.name || "Group Call" : remoteUser?.name;
+    const displayAvatar = isGroupCall
+        ? groupInfo?.profilePicture || ""
+        : remoteUser?.profilePicture;
 
     return (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200 select-none">
@@ -18,26 +30,69 @@ export const IncomingCallModal = () => {
                 <div className="relative my-4">
                     <div className="absolute inset-0 rounded-full bg-purple-500/20 animate-ping" />
                     <div className="relative ring-4 ring-purple-500/30 rounded-full p-1">
-                        <Avatar
-                            src={remoteUser.profilePicture}
-                            name={remoteUser.name}
-                            size={88}
-                            className="shadow-2xl"
-                        />
+                        {isGroupCall ? (
+                            <div className="w-[88px] h-[88px] rounded-full bg-gradient-to-tr from-purple-600 to-indigo-500 flex items-center justify-center text-white font-bold text-2xl shadow-2xl overflow-hidden">
+                                {displayAvatar ? (
+                                    displayAvatar.startsWith("http") ||
+                                    displayAvatar.startsWith("data:") ? (
+                                        <img
+                                            src={displayAvatar}
+                                            alt={displayName}
+                                            className="w-full h-full object-cover rounded-full"
+                                        />
+                                    ) : (
+                                        <span>{displayAvatar}</span>
+                                    )
+                                ) : (
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        className="w-10 h-10"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                    >
+                                        <path
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                            strokeWidth={2}
+                                            d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
+                                        />
+                                    </svg>
+                                )}
+                            </div>
+                        ) : (
+                            <Avatar
+                                src={displayAvatar}
+                                name={displayName}
+                                size={88}
+                                className="shadow-2xl"
+                            />
+                        )}
                     </div>
                 </div>
 
                 {/* Call Info */}
-                <h3 className="text-lg font-bold text-white tracking-tight mt-2">
-                    {remoteUser.name}
+                <h3 className="text-lg font-bold text-white tracking-tight mt-2 flex items-center justify-center gap-1.5">
+                    <span>{displayName}</span>
+                    {isGroupCall && (
+                        <span className="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 text-[10px] font-medium border border-purple-500/30">
+                            Group
+                        </span>
+                    )}
                 </h3>
+
                 <p className="text-xs text-zinc-400 font-mono mt-0.5">
-                    {remoteUser.phone}
+                    {isGroupCall
+                        ? `Called by ${remoteUser?.name || "Member"}`
+                        : remoteUser?.phone || ""}
                 </p>
 
                 <div className="mt-3 inline-flex items-center gap-2 px-3 py-1 rounded-full bg-purple-600/20 border border-purple-500/30 text-purple-300 text-xs font-medium">
                     <span>{callType === "video" ? "📹" : "📞"}</span>
-                    <span>Incoming {callType === "video" ? "Video" : "Audio"} Call...</span>
+                    <span>
+                        Incoming {isGroupCall ? "Group " : ""}
+                        {callType === "video" ? "Video" : "Audio"} Call...
+                    </span>
                 </div>
 
                 {/* Action Buttons: Decline & Accept */}

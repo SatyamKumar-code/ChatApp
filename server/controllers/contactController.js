@@ -3,19 +3,49 @@ import User from "../models/User.js";
 
 const getContacts = async (req, res) => {
     try {
+        const currentUserId = req.user._id;
+        const currentUser = await User.findById(currentUserId).select("blockedUsers");
+        const myBlocked = (currentUser?.blockedUsers || []).map((id) => (id?._id || id).toString());
+
         const contacts = await Contact.find({
-            owner: req.user._id
+            owner: currentUserId,
         })
-            .populate("contactUser", "name phone profilePic isOnline lastSeen")
+            .populate("contactUser", "name phone profilePicture isOnline lastSeen blockedUsers")
             .sort({ name: 1 });
 
-        const result = contacts.map((contact) => ({
-            _id: contact._id,
-            name: contact.name,
-            phone: contact.phone,
-            registered: Boolean(contact.contactUser),
-            user: contact.contactUser || null,
-        }));
+        const result = contacts.map((contact) => {
+            const cUser = contact.contactUser;
+            let formattedUser = null;
+
+            if (cUser) {
+                const isBlockedByOther = Boolean(
+                    cUser.blockedUsers &&
+                    cUser.blockedUsers.some(
+                        (bId) => (bId?._id || bId).toString() === currentUserId.toString()
+                    )
+                );
+                const isBlockedByMe = myBlocked.includes(cUser._id.toString());
+
+                formattedUser = {
+                    _id: cUser._id,
+                    name: cUser.name,
+                    phone: cUser.phone,
+                    profilePicture: isBlockedByOther ? "" : (cUser.profilePicture || ""),
+                    isOnline: isBlockedByOther ? false : Boolean(cUser.isOnline),
+                    lastSeen: isBlockedByOther ? null : cUser.lastSeen,
+                    isBlockedByOther,
+                    isBlocked: isBlockedByMe,
+                };
+            }
+
+            return {
+                _id: contact._id,
+                name: contact.name,
+                phone: contact.phone,
+                registered: Boolean(cUser),
+                user: formattedUser,
+            };
+        });
 
         res.json({
             success: true,
@@ -29,12 +59,13 @@ const getContacts = async (req, res) => {
             error: true,
             message: "Server error while fetching contacts",
         });
-    };
-}
+    }
+};
 
 const addContact = async (req, res) => {
     try {
         const { name, phone } = req.body;
+        const currentUserId = req.user._id;
 
         // Phone is required, name is optional (will be fetched from registered user or set as phone number)
         if (!phone?.trim()) {
@@ -66,7 +97,7 @@ const addContact = async (req, res) => {
         }
 
         const existing = await Contact.findOne({
-            owner: req.user._id,
+            owner: currentUserId,
             phone: normalizedPhone,
         });
 
@@ -92,7 +123,7 @@ const addContact = async (req, res) => {
         }
 
         const contact = new Contact({
-            owner: req.user._id,
+            owner: currentUserId,
             name: contactName,
             phone: normalizedPhone,
             contactUser: registeredUser ? registeredUser._id : null,
@@ -101,7 +132,28 @@ const addContact = async (req, res) => {
         await contact.save();
 
         // Populate the contactUser field for the response
-        await contact.populate("contactUser", "name phone profilePic isOnline lastSeen");
+        await contact.populate("contactUser", "name phone profilePicture isOnline lastSeen blockedUsers");
+
+        const cUser = contact.contactUser;
+        let formattedUser = null;
+        if (cUser) {
+            const isBlockedByOther = Boolean(
+                cUser.blockedUsers &&
+                cUser.blockedUsers.some(
+                    (bId) => (bId?._id || bId).toString() === currentUserId.toString()
+                )
+            );
+
+            formattedUser = {
+                _id: cUser._id,
+                name: cUser.name,
+                phone: cUser.phone,
+                profilePicture: isBlockedByOther ? "" : (cUser.profilePicture || ""),
+                isOnline: isBlockedByOther ? false : Boolean(cUser.isOnline),
+                lastSeen: isBlockedByOther ? null : cUser.lastSeen,
+                isBlockedByOther,
+            };
+        }
 
         res.status(201).json({
             success: true,
@@ -112,7 +164,7 @@ const addContact = async (req, res) => {
                 name: contact.name,
                 phone: contact.phone,
                 registered: Boolean(contact.contactUser),
-                user: contact.contactUser || null,
+                user: formattedUser,
             },
         });
     } catch (error) {

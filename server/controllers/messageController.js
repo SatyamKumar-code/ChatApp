@@ -91,6 +91,16 @@ const sendMessage = async (req, res) => {
           message: "Receiver not found",
         });
       }
+
+      // Check if receiver has blocked the current user
+      const isBlockedByReceiver = Boolean(
+        receiver?.blockedUsers &&
+        receiver.blockedUsers.some(
+          (bId) => (bId?._id || bId).toString() === req.user._id.toString()
+        )
+      );
+
+      var deletedForList = isBlockedByReceiver ? [receiverId] : [];
     }
 
     const finalType =
@@ -115,13 +125,17 @@ const sendMessage = async (req, res) => {
       fileSize: fileSize || 0,
       duration: duration || 0,
       replyTo: replyTo || null,
+      isDelivered: false,
+      isSeen: false,
+      deletedFor: typeof deletedForList !== "undefined" ? deletedForList : [],
     });
 
-    // Update conversation
-    conversation.lastMessage = message._id;
-    conversation.lastMessageAt = new Date();
-
-    await conversation.save();
+    // Update conversation lastMessage only if receiver has not blocked sender
+    if (typeof isBlockedByReceiver === "undefined" || !isBlockedByReceiver) {
+      conversation.lastMessage = message._id;
+      conversation.lastMessageAt = new Date();
+      await conversation.save();
+    }
 
     // Populate sender, receiver, reactions, and replyTo
     const populatedMessage = await Message.findById(message._id)
@@ -162,24 +176,47 @@ const getMessages = async (req, res) => {
       });
     }
 
-    // Check participant
+    // Check participant or past participant
     const isParticipant = conversation.participants.some(
       (participant) =>
         participant.toString() === req.user._id.toString()
     );
 
-    if (!isParticipant) {
+    const userJoinedEntry = conversation.participantJoinedAt?.find(
+      (p) => (p.user?._id || p.user)?.toString() === req.user._id.toString()
+    );
+    const isPastParticipant =
+      Boolean(userJoinedEntry) ||
+      (conversation.pastParticipants &&
+        conversation.pastParticipants.some((p) => p.toString() === req.user._id.toString()));
+
+    if (!isParticipant && !isPastParticipant) {
       return res.status(403).json({
         success: false,
         message: "You are not a participant of this conversation",
       });
     }
 
-    // Exclude messages deleted for current user
-    const messages = await Message.find({
+    // Exclude messages deleted for current user, and for groups, filter by joinedAt and leftAt
+    const messageFilter = {
       conversation: conversationId,
       deletedFor: { $ne: req.user._id },
-    })
+    };
+
+    if (conversation.isGroup && userJoinedEntry) {
+      const timeFilter = {};
+      if (userJoinedEntry.joinedAt) {
+        timeFilter.$gte = userJoinedEntry.joinedAt;
+      }
+      if (userJoinedEntry.leftAt) {
+        timeFilter.$lte = userJoinedEntry.leftAt;
+      }
+      if (Object.keys(timeFilter).length > 0) {
+        messageFilter.createdAt = timeFilter;
+      }
+    }
+
+    const messages = await Message.find(messageFilter)
       .populate("sender", "name phone profilePicture isOnline")
       .populate("receiver", "name phone profilePicture isOnline")
       .populate("reactions.user", "name profilePicture")
@@ -534,6 +571,49 @@ const forwardMessage = async (req, res) => {
   }
 };
 
+// Clear all messages in a conversation for the current user
+const clearConversationMessages = async (req, res) => {
+  try {
+    const { conversationId } = req.params;
+    const userId = req.user._id;
+
+    const conversation = await Conversation.findOne({
+      _id: conversationId,
+      participants: userId,
+    });
+
+    if (!conversation) {
+      return res.status(404).json({
+        success: false,
+        message: "Conversation not found",
+      });
+    }
+
+    // Add userId to deletedFor for all messages in this conversation
+    await Message.updateMany(
+      {
+        conversation: conversationId,
+        deletedFor: { $ne: userId },
+      },
+      {
+        $addToSet: { deletedFor: userId },
+      }
+    );
+
+    res.status(200).json({
+      success: true,
+      conversationId,
+      message: "Chat cleared successfully",
+    });
+  } catch (error) {
+    console.error("Clear chat error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to clear chat",
+    });
+  }
+};
+
 export {
   sendMessage,
   getMessages,
@@ -542,4 +622,5 @@ export {
   toggleStarMessage,
   getStarredMessages,
   forwardMessage,
+  clearConversationMessages,
 };

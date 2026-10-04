@@ -30,8 +30,29 @@ const messageSchema = new mongoose.Schema(
 
     messageType: {
       type: String,
-      enum: ["text", "image", "file", "audio"],
+      enum: ["text", "image", "file", "audio", "system", "call"],
       default: "text",
+    },
+
+    callDetails: {
+      callType: {
+        type: String,
+        enum: ["audio", "video"],
+        default: "video",
+      },
+      status: {
+        type: String,
+        enum: ["incoming", "outgoing", "missed", "rejected", "completed"],
+        default: "completed",
+      },
+      duration: {
+        type: Number,
+        default: 0,
+      },
+      isGroupCall: {
+        type: Boolean,
+        default: false,
+      },
     },
 
     fileUrl: {

@@ -144,6 +144,7 @@ export const MessageList = ({
                                     <MessageBubble
                                         message={message}
                                         isMyMessage={isMyMessage}
+                                        isGroup={Boolean(selectedConversation?.isGroup)}
                                         currentUserId={user?._id}
                                         onReply={setReplyingTo}
                                         onForward={onForward}

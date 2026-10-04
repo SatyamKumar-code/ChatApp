@@ -1,5 +1,38 @@
 import Conversation from "../models/Conversation.js";
 import User from "../models/User.js";
+import Message from "../models/Message.js";
+
+// Helper to create and broadcast system audit messages in group chats
+const createAndBroadcastSystemMessage = async (conversationId, senderId, text, io, participants) => {
+    try {
+        const sysMsg = await Message.create({
+            conversation: conversationId,
+            sender: senderId,
+            text,
+            messageType: "system",
+        });
+
+        await Conversation.findByIdAndUpdate(conversationId, {
+            lastMessage: sysMsg._id,
+            lastMessageAt: new Date(),
+        });
+
+        const populatedSysMsg = await Message.findById(sysMsg._id)
+            .populate("sender", "name phone profilePicture isOnline");
+
+        if (io && participants) {
+            participants.forEach((p) => {
+                const pId = (p?._id || p).toString();
+                io.to(`user:${pId}`).emit("newMessage", populatedSysMsg);
+            });
+        }
+
+        return populatedSysMsg;
+    } catch (err) {
+        console.error("Create system message error:", err);
+        return null;
+    }
+};
 
 // Helper to format a conversation for clients
 const formatConversationForClient = (conversation, currentUserId) => {
@@ -9,13 +42,43 @@ const formatConversationForClient = (conversation, currentUserId) => {
             (id) => (id?._id || id)?.toString() === currentUserId.toString()
         )
     );
-    const pinnedMessages = conversation.pinnedMessages || [];
+    let pinnedMessages = conversation.pinnedMessages || [];
 
     if (conversation.isGroup) {
+        const isParticipant = conversation.participants.some(
+            (p) => (p?._id || p)?.toString() === currentUserId.toString()
+        );
+        const isLeft = !isParticipant;
+
+        let clientLastMessage = conversation.lastMessage || null;
+        const userJoinedEntry = conversation.participantJoinedAt?.find(
+            (p) => (p.user?._id || p.user)?.toString() === currentUserId.toString()
+        );
+
+        if (userJoinedEntry) {
+            const joinTime = userJoinedEntry.joinedAt ? new Date(userJoinedEntry.joinedAt).getTime() : 0;
+            const leaveTime = userJoinedEntry.leftAt ? new Date(userJoinedEntry.leftAt).getTime() : Infinity;
+
+            if (clientLastMessage && clientLastMessage.createdAt) {
+                const msgTime = new Date(clientLastMessage.createdAt).getTime();
+                if (msgTime < joinTime || msgTime > leaveTime) {
+                    clientLastMessage = null;
+                }
+            }
+            if (pinnedMessages.length > 0) {
+                pinnedMessages = pinnedMessages.filter((pm) => {
+                    if (!pm.createdAt) return true;
+                    const pmTime = new Date(pm.createdAt).getTime();
+                    return pmTime >= joinTime && pmTime <= leaveTime;
+                });
+            }
+        }
+
         return {
             _id: conversation._id,
             isGroup: true,
             isPinned,
+            isLeft,
             pinnedMessages,
             groupName: conversation.groupName || "Unnamed Group",
             groupAvatar: conversation.groupAvatar || "",
@@ -28,11 +91,13 @@ const formatConversationForClient = (conversation, currentUserId) => {
                 onlyAdminsCanAddMembers: false,
             },
             participants: conversation.participants || [],
+            participantJoinedAt: conversation.participantJoinedAt || [],
             user: {
                 _id: conversation._id,
                 name: conversation.groupName || "Unnamed Group",
                 profilePicture: conversation.groupAvatar || "",
                 isGroup: true,
+                isLeft,
                 participantsCount: conversation.participants?.length || 0,
                 participants: conversation.participants || [],
                 groupAdmin: conversation.groupAdmin || null,
@@ -44,8 +109,10 @@ const formatConversationForClient = (conversation, currentUserId) => {
                 },
                 groupDescription: conversation.groupDescription || "",
             },
-            lastMessage: conversation.lastMessage || null,
-            lastMessageAt: conversation.lastMessageAt || conversation.updatedAt,
+            lastMessage: clientLastMessage,
+            lastMessageAt: clientLastMessage
+                ? (clientLastMessage.createdAt || conversation.lastMessageAt || conversation.updatedAt)
+                : (userJoinedEntry?.leftAt || userJoinedEntry?.joinedAt || conversation.createdAt),
             createdAt: conversation.createdAt,
         };
     } else {
@@ -54,13 +121,34 @@ const formatConversationForClient = (conversation, currentUserId) => {
                 participant._id?.toString() !== currentUserId.toString()
         );
 
+        let userObj = null;
+        if (otherUser) {
+            const isBlockedByOther = Boolean(
+                otherUser.blockedUsers &&
+                otherUser.blockedUsers.some(
+                    (bId) => (bId?._id || bId).toString() === currentUserId.toString()
+                )
+            );
+
+            userObj = {
+                _id: otherUser._id,
+                name: otherUser.name,
+                phone: otherUser.phone,
+                profilePicture: isBlockedByOther ? "" : (otherUser.profilePicture || ""),
+                about: isBlockedByOther ? "" : (otherUser.about || ""),
+                isOnline: isBlockedByOther ? false : Boolean(otherUser.isOnline),
+                lastSeen: isBlockedByOther ? null : otherUser.lastSeen,
+                isBlockedByOther,
+            };
+        }
+
         return {
             _id: conversation._id,
             isGroup: false,
             isPinned,
             pinnedMessages,
             participants: conversation.participants,
-            user: otherUser || null,
+            user: userObj,
             lastMessage: conversation.lastMessage || null,
             lastMessageAt: conversation.lastMessageAt || conversation.updatedAt,
             createdAt: conversation.createdAt,
@@ -72,11 +160,16 @@ const formatConversationForClient = (conversation, currentUserId) => {
 const getMyConversations = async (req, res) => {
     try {
         const conversations = await Conversation.find({
-            participants: req.user._id,
+            $or: [
+                { participants: req.user._id },
+                { pastParticipants: req.user._id },
+                { "participantJoinedAt.user": req.user._id },
+            ],
+            hiddenFor: { $ne: req.user._id },
         })
             .populate(
                 "participants",
-                "name phone profilePicture isOnline lastSeen"
+                "name phone profilePicture isOnline lastSeen blockedUsers"
             )
             .populate(
                 "groupAdmin",
@@ -174,7 +267,7 @@ const getOrCreateConversation = async (req, res) => {
 
         conversation = await conversation.populate(
             "participants",
-            "name phone profilePicture isOnline lastSeen"
+            "name phone profilePicture isOnline lastSeen blockedUsers"
         );
         conversation = await conversation.populate(
             "lastMessage",
@@ -231,15 +324,22 @@ const createGroupConversation = async (req, res) => {
             });
         }
 
+        const joinDate = new Date();
+        const participantJoinedAt = allParticipants.map((pId) => ({
+            user: pId,
+            joinedAt: joinDate,
+        }));
+
         const conversation = await Conversation.create({
             isGroup: true,
             groupName: groupName.trim(),
             groupAvatar: groupAvatar || "",
             groupDescription: groupDescription ? groupDescription.trim() : "",
             participants: allParticipants,
+            participantJoinedAt,
             groupAdmin: req.user._id,
             groupAdmins: [req.user._id],
-            lastMessageAt: new Date(),
+            lastMessageAt: joinDate,
         });
 
         const populated = await Conversation.findById(conversation._id)
@@ -256,9 +356,19 @@ const createGroupConversation = async (req, res) => {
         if (io) {
             populated.participants.forEach((p) => {
                 const pId = (p?._id || p).toString();
-                io.to(`user:${pId}`).emit("group:created", formatted);
+                const memberFormatted = formatConversationForClient(populated, pId);
+                io.to(`user:${pId}`).emit("group:created", memberFormatted);
             });
         }
+
+        // Create initial system message for group creation
+        await createAndBroadcastSystemMessage(
+            conversation._id,
+            req.user._id,
+            `${req.user.name} created group "${groupName.trim()}"`,
+            io,
+            populated.participants
+        );
 
         res.status(201).json({
             success: true,
@@ -306,6 +416,13 @@ const updateGroup = async (req, res) => {
             conversation.groupAdmins.some((a) => (a?._id || a).toString() === userId);
         const isAdmin = isOwner || isCoAdmin;
 
+        const oldName = conversation.groupName;
+        const oldAvatar = conversation.groupAvatar;
+        const oldDescription = conversation.groupDescription;
+        const oldSettings = { ...(conversation.groupSettings?.toObject ? conversation.groupSettings.toObject() : conversation.groupSettings) };
+
+        const changes = [];
+
         // If updating groupSettings (permissions), ONLY admins are allowed
         if (groupSettings !== undefined) {
             if (!isAdmin) {
@@ -313,6 +430,28 @@ const updateGroup = async (req, res) => {
                     success: false,
                     message: "Only group admins can change group settings",
                 });
+            }
+
+            if (groupSettings.onlyAdminsCanEditInfo !== undefined && Boolean(groupSettings.onlyAdminsCanEditInfo) !== Boolean(oldSettings.onlyAdminsCanEditInfo)) {
+                changes.push(
+                    groupSettings.onlyAdminsCanEditInfo
+                        ? `${req.user.name} changed group settings to allow only admins to edit group info`
+                        : `${req.user.name} changed group settings to allow all members to edit group info`
+                );
+            }
+            if (groupSettings.onlyAdminsCanSendMessages !== undefined && Boolean(groupSettings.onlyAdminsCanSendMessages) !== Boolean(oldSettings.onlyAdminsCanSendMessages)) {
+                changes.push(
+                    groupSettings.onlyAdminsCanSendMessages
+                        ? `${req.user.name} changed group settings to allow only admins to send messages`
+                        : `${req.user.name} changed group settings to allow all members to send messages`
+                );
+            }
+            if (groupSettings.onlyAdminsCanAddMembers !== undefined && Boolean(groupSettings.onlyAdminsCanAddMembers) !== Boolean(oldSettings.onlyAdminsCanAddMembers)) {
+                changes.push(
+                    groupSettings.onlyAdminsCanAddMembers
+                        ? `${req.user.name} changed group settings to allow only admins to add members`
+                        : `${req.user.name} changed group settings to allow all members to add members`
+                );
             }
 
             conversation.groupSettings = {
@@ -349,14 +488,17 @@ const updateGroup = async (req, res) => {
                 });
             }
 
-            if (groupName !== undefined && groupName.trim()) {
+            if (groupName !== undefined && groupName.trim() && groupName.trim() !== oldName) {
                 conversation.groupName = groupName.trim();
+                changes.push(`${req.user.name} changed the group name to "${groupName.trim()}"`);
             }
-            if (groupAvatar !== undefined) {
+            if (groupAvatar !== undefined && groupAvatar !== oldAvatar) {
                 conversation.groupAvatar = groupAvatar;
+                changes.push(`${req.user.name} changed the group icon`);
             }
-            if (groupDescription !== undefined) {
+            if (groupDescription !== undefined && groupDescription.trim() !== (oldDescription || "")) {
                 conversation.groupDescription = groupDescription.trim();
+                changes.push(`${req.user.name} changed the group description`);
             }
         }
 
@@ -383,6 +525,17 @@ const updateGroup = async (req, res) => {
                 const pId = (p?._id || p).toString();
                 io.to(`user:${pId}`).emit("group:updated", formatted);
             });
+        }
+
+        // Broadcast system messages for each change made
+        for (const changeText of changes) {
+            await createAndBroadcastSystemMessage(
+                id,
+                req.user._id,
+                changeText,
+                io,
+                populated.participants
+            );
         }
 
         res.status(200).json({
@@ -450,7 +603,59 @@ const addGroupMembers = async (req, res) => {
             conversation.participants.map((p) => (p?._id || p).toString())
         );
 
-        members.forEach((mId) => currentSet.add(mId.toString()));
+        const now = new Date();
+        if (!conversation.participantJoinedAt) {
+            conversation.participantJoinedAt = [];
+        }
+
+        // For existing participants without join records, default to conversation.createdAt
+        conversation.participants.forEach((p) => {
+            const pIdStr = (p?._id || p).toString();
+            if (!conversation.participantJoinedAt.some((pj) => (pj.user?._id || pj.user).toString() === pIdStr)) {
+                conversation.participantJoinedAt.push({
+                    user: p,
+                    joinedAt: conversation.createdAt || now,
+                });
+            }
+        });
+
+        // Add newly added members with join time = now
+        const newlyAddedIds = [];
+        members.forEach((mId) => {
+            const mIdStr = mId.toString();
+            if (!currentSet.has(mIdStr)) {
+                currentSet.add(mIdStr);
+                newlyAddedIds.push(mIdStr);
+
+                // If previously in pastParticipants or hiddenFor, remove them
+                if (conversation.pastParticipants) {
+                    conversation.pastParticipants = conversation.pastParticipants.filter(
+                        (p) => (p?._id || p).toString() !== mIdStr
+                    );
+                }
+                if (conversation.hiddenFor) {
+                    conversation.hiddenFor = conversation.hiddenFor.filter(
+                        (p) => (p?._id || p).toString() !== mIdStr
+                    );
+                }
+
+                // Update or push join record
+                const existingEntry = conversation.participantJoinedAt.find(
+                    (pj) => (pj.user?._id || pj.user).toString() === mIdStr
+                );
+                if (existingEntry) {
+                    existingEntry.joinedAt = now;
+                    existingEntry.leftAt = null;
+                } else {
+                    conversation.participantJoinedAt.push({
+                        user: mId,
+                        joinedAt: now,
+                        leftAt: null,
+                    });
+                }
+            }
+        });
+
         conversation.participants = Array.from(currentSet);
 
         await conversation.save();
@@ -469,13 +674,27 @@ const addGroupMembers = async (req, res) => {
 
         const formatted = formatConversationForClient(populated, req.user._id);
 
-        // Realtime broadcast to all group members
+        // Realtime broadcast to all group members (formatted per member)
         const io = req.app.get("io");
         if (io) {
             populated.participants.forEach((p) => {
                 const pId = (p?._id || p).toString();
-                io.to(`user:${pId}`).emit("group:updated", formatted);
+                const memberFormatted = formatConversationForClient(populated, pId);
+                io.to(`user:${pId}`).emit("group:updated", memberFormatted);
             });
+        }
+
+        // Query added members' names to show in the system message
+        if (newlyAddedIds.length > 0) {
+            const addedUsers = await User.find({ _id: { $in: newlyAddedIds } }).select("name");
+            const addedNames = addedUsers.map((u) => u.name).filter(Boolean).join(", ");
+            await createAndBroadcastSystemMessage(
+                id,
+                req.user._id,
+                `${req.user.name} added ${addedNames || "new member(s)"}`,
+                io,
+                populated.participants
+            );
         }
 
         res.status(200).json({
@@ -530,9 +749,36 @@ const removeGroupMember = async (req, res) => {
             });
         }
 
+        // Find target user's name before removing from list
+        const targetUser = await User.findById(targetId).select("name");
+
         conversation.participants = conversation.participants.filter(
             (p) => (p?._id || p).toString() !== targetId
         );
+
+        if (!conversation.pastParticipants) {
+            conversation.pastParticipants = [];
+        }
+        if (!conversation.pastParticipants.some((p) => (p?._id || p).toString() === targetId)) {
+            conversation.pastParticipants.push(targetId);
+        }
+
+        const now = new Date();
+        if (!conversation.participantJoinedAt) {
+            conversation.participantJoinedAt = [];
+        }
+        const targetJoinedEntry = conversation.participantJoinedAt.find(
+            (pj) => (pj.user?._id || pj.user).toString() === targetId
+        );
+        if (targetJoinedEntry) {
+            targetJoinedEntry.leftAt = now;
+        } else {
+            conversation.participantJoinedAt.push({
+                user: targetId,
+                joinedAt: conversation.createdAt || now,
+                leftAt: now,
+            });
+        }
 
         if (conversation.groupAdmins) {
             conversation.groupAdmins = conversation.groupAdmins.filter(
@@ -577,17 +823,31 @@ const removeGroupMember = async (req, res) => {
 
         const io = req.app.get("io");
         if (io) {
-            // Notify the member who left or was removed
-            io.to(`user:${targetId}`).emit("group:removed", {
-                conversationId: id,
-                removedBy: req.user._id,
-            });
+            // Send updated group state to the member who left / was removed (with isLeft: true)
+            const targetFormatted = formatConversationForClient(populated, targetId);
+            io.to(`user:${targetId}`).emit("group:updated", targetFormatted);
+
             // Broadcast updated group to remaining participants
             populated.participants.forEach((p) => {
                 const pId = (p?._id || p).toString();
-                io.to(`user:${pId}`).emit("group:updated", formatted);
+                const memberFormatted = formatConversationForClient(populated, pId);
+                io.to(`user:${pId}`).emit("group:updated", memberFormatted);
             });
         }
+
+        // Broadcast system audit message (left or removed)
+        const sysMsgText = isSelfLeaving
+            ? `${req.user.name} left the group`
+            : `${req.user.name} removed ${targetUser?.name || "a member"}`;
+
+        const allAudience = [...populated.participants, targetId];
+        await createAndBroadcastSystemMessage(
+            id,
+            req.user._id,
+            sysMsgText,
+            io,
+            allAudience
+        );
 
         res.status(200).json({
             success: true,
@@ -651,6 +911,8 @@ const toggleGroupAdmin = async (req, res) => {
             });
         }
 
+        const targetUser = await User.findById(targetId).select("name");
+
         conversation.groupAdmins = conversation.groupAdmins || [];
         const adminIndex = conversation.groupAdmins.findIndex(
             (a) => (a?._id || a).toString() === targetId
@@ -690,6 +952,19 @@ const toggleGroupAdmin = async (req, res) => {
                 io.to(`user:${pId}`).emit("group:updated", formatted);
             });
         }
+
+        // Broadcast role change system message
+        const roleMsgText = isNowAdmin
+            ? `${req.user.name} made ${targetUser?.name || "a member"} a group admin`
+            : `${req.user.name} dismissed ${targetUser?.name || "a member"} as group admin`;
+
+        await createAndBroadcastSystemMessage(
+            id,
+            req.user._id,
+            roleMsgText,
+            io,
+            populated.participants
+        );
 
         res.status(200).json({
             success: true,
@@ -832,6 +1107,64 @@ const togglePinMessage = async (req, res) => {
     }
 };
 
+// Delete / Hide Conversation for logged-in user (Clears from list & deletes messages for user)
+const deleteConversation = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const userId = req.user._id;
+
+        const conversation = await Conversation.findOne({
+            _id: id,
+            $or: [
+                { participants: userId },
+                { pastParticipants: userId },
+                { "participantJoinedAt.user": userId },
+            ],
+        });
+
+        if (!conversation) {
+            return res.status(404).json({
+                success: false,
+                message: "Conversation not found",
+            });
+        }
+
+        if (!conversation.hiddenFor) {
+            conversation.hiddenFor = [];
+        }
+        if (!conversation.hiddenFor.some((u) => (u?._id || u).toString() === userId.toString())) {
+            conversation.hiddenFor.push(userId);
+        }
+
+        // Also remove from pinnedBy if pinned
+        if (conversation.pinnedBy) {
+            conversation.pinnedBy = conversation.pinnedBy.filter(
+                (u) => (u?._id || u).toString() !== userId.toString()
+            );
+        }
+
+        await conversation.save();
+
+        // Mark all messages as deletedFor this user
+        await Message.updateMany(
+            { conversation: id, deletedFor: { $ne: userId } },
+            { $addToSet: { deletedFor: userId } }
+        );
+
+        res.status(200).json({
+            success: true,
+            conversationId: id,
+            message: "Conversation deleted successfully",
+        });
+    } catch (error) {
+        console.error("Delete conversation error:", error);
+        res.status(500).json({
+            success: false,
+            message: "Failed to delete conversation",
+        });
+    }
+};
+
 export {
     getMyConversations,
     getOrCreateConversation,
@@ -842,4 +1175,5 @@ export {
     togglePinConversation,
     togglePinMessage,
     toggleGroupAdmin,
+    deleteConversation,
 };

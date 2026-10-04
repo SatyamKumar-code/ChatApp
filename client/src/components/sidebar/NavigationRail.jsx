@@ -1,5 +1,6 @@
 import React, { useContext } from "react";
 import { AuthContext } from "../../context/AuthContext";
+import { useTheme, THEME_MODES } from "../../context/ThemeContext";
 import Avatar from "../common/Avatar";
 
 export const NavigationRail = ({
@@ -9,6 +10,7 @@ export const NavigationRail = ({
     unreadTotal = 0,
 }) => {
     const { user, logout } = useContext(AuthContext);
+    const { themeMode, changeThemeMode, resolvedTheme } = useTheme();
 
     return (
         <aside className="hidden md:flex w-16 md:w-20 shrink-0 bg-[#0c0c18] border-r border-white/5 flex-col items-center py-4 justify-between z-20 select-none">
@@ -135,13 +137,34 @@ export const NavigationRail = ({
                 </nav>
             </div>
 
-            {/* Bottom Actions: Settings & User Avatar */}
-            <div className="flex flex-col items-center gap-3">
+            {/* Bottom Actions: Theme Toggle, Settings & User Avatar */}
+            <div className="flex flex-col items-center gap-2.5">
+                {/* Quick Theme Mode Toggle Button */}
+                <button
+                    onClick={() => {
+                        if (themeMode === THEME_MODES.SYSTEM) changeThemeMode(THEME_MODES.DARK);
+                        else if (themeMode === THEME_MODES.DARK) changeThemeMode(THEME_MODES.LIGHT);
+                        else changeThemeMode(THEME_MODES.SYSTEM);
+                    }}
+                    title={`Theme: ${themeMode} (${resolvedTheme}) - Click to switch`}
+                    className="w-10 h-10 rounded-xl flex items-center justify-center text-zinc-400 hover:text-amber-400 hover:bg-white/5 transition-all cursor-pointer active:scale-95"
+                >
+                    {resolvedTheme === "light" ? (
+                        <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+                        </svg>
+                    ) : (
+                        <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+                        </svg>
+                    )}
+                </button>
+
                 {/* Settings Button */}
                 <button
                     onClick={onOpenSettings}
                     title="Settings"
-                    className="w-10 h-10 rounded-xl flex items-center justify-center text-zinc-400 hover:text-white hover:bg-white/5 transition-all"
+                    className="w-10 h-10 rounded-xl flex items-center justify-center text-zinc-400 hover:text-white hover:bg-white/5 transition-all cursor-pointer"
                 >
                     <svg
                         xmlns="http://www.w3.org/2000/svg"

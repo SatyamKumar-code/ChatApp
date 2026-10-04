@@ -7,7 +7,8 @@ import Avatar from "../common/Avatar";
 export const CallHistoryList = ({ onOpenSettings }) => {
     const { user } = useContext(AuthContext);
     const { conversations, contacts } = useContext(ChatContext);
-    const { callHistory, clearCallHistory, startCall } = useContext(CallContext);
+    const { callHistory, clearCallHistory, startCall, startGroupCall } =
+        useContext(CallContext);
 
     const [searchQuery, setSearchQuery] = useState("");
     const [isNewCallModalOpen, setIsNewCallModalOpen] = useState(false);
@@ -82,122 +83,25 @@ export const CallHistoryList = ({ onOpenSettings }) => {
     });
 
     return (
-        <div className="flex-1 flex flex-col min-w-0 bg-[#0f0f1c] select-none h-full border-r border-white/5">
-            {/* Top Header */}
-            <div className="px-4 md:px-5 pt-4 md:pt-5 pb-3 border-b border-white/5 space-y-3">
-                <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2.5">
-                        {onOpenSettings && (
-                            <div
-                                onClick={onOpenSettings}
-                                className="md:hidden cursor-pointer active:scale-95 transition-transform"
-                                title="Profile & Settings"
-                            >
-                                <Avatar
-                                    src={user?.profilePicture}
-                                    name={user?.name}
-                                    size={34}
-                                    isOnline={true}
-                                />
-                            </div>
-                        )}
-                        <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
-                            Calls
-                            <span className="text-xs px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-300 font-semibold border border-purple-500/20">
-                                {filteredCalls.length}
-                            </span>
-                        </h2>
-                    </div>
-
-                    <div className="flex items-center gap-1.5">
-                        <button
-                            type="button"
-                            onClick={() => setIsNewCallModalOpen(true)}
-                            className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold shadow-md shadow-purple-600/30 transition-all flex items-center gap-1.5 cursor-pointer"
-                            title="New Call"
+        <div className="flex-1 flex flex-col min-w-0 bg-[#0f0f1c] select-none h-full border-r border-white/5 relative">
+            {/* Header */}
+            <div className="px-5 py-4 border-b border-white/5 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                    {onOpenSettings && (
+                        <div
+                            onClick={onOpenSettings}
+                            className="md:hidden cursor-pointer active:scale-95 transition-transform"
+                            title="Profile & Settings"
                         >
-                            <span className="text-sm font-bold">+</span>
-                            <span>New Call</span>
-                        </button>
-
-                        {callHistory.length > 0 && (
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    if (confirm("Are you sure you want to clear your call history?")) {
-                                        clearCallHistory();
-                                    }
-                                }}
-                                className="px-2.5 py-1.5 rounded-xl bg-white/5 hover:bg-rose-500/20 text-zinc-400 hover:text-rose-400 text-xs font-medium transition-colors cursor-pointer"
-                                title="Clear History"
-                            >
-                                Clear
-                            </button>
-                        )}
-
-                        {onOpenSettings && (
-                            <button
-                                type="button"
-                                onClick={onOpenSettings}
-                                className="md:hidden w-8 h-8 rounded-xl bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
-                                title="Settings"
-                            >
-                                <svg
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    className="w-4 h-4"
-                                    fill="none"
-                                    viewBox="0 0 24 24"
-                                    stroke="currentColor"
-                                >
-                                    <path
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        strokeWidth={2}
-                                        d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
-                                    />
-                                    <path
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        strokeWidth={2}
-                                        d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                                    />
-                                </svg>
-                            </button>
-                        )}
-                    </div>
-                </div>
-
-                {/* Search Bar */}
-                <div className="relative">
-                    <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        className="w-4 h-4 text-zinc-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                    >
-                        <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-                        />
-                    </svg>
-                    <input
-                        type="text"
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        placeholder="Search call history..."
-                        className="w-full pl-9 pr-8 py-2 rounded-xl bg-[#16162a] border border-white/5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-purple-500/50 focus:bg-[#1a1a32] transition-all"
-                    />
-                    {searchQuery && (
-                        <button
-                            onClick={() => setSearchQuery("")}
-                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 text-xs w-4 h-4 rounded-full flex items-center justify-center"
-                        >
-                            ✕
-                        </button>
+                            <Avatar
+                                src={user?.profilePicture}
+                                name={user?.name}
+                                size={34}
+                                isOnline={true}
+                            />
+                        </div>
                     )}
+                    <h2 className="text-xl font-bold text-white tracking-tight">Calls</h2>
                 </div>
             </div>
 
@@ -223,9 +127,8 @@ export const CallHistoryList = ({ onOpenSettings }) => {
 
                                     <div className="flex-1 min-w-0">
                                         <h4
-                                            className={`text-sm font-semibold truncate ${
-                                                isMissed ? "text-rose-400" : "text-white"
-                                            }`}
+                                            className={`text-sm font-semibold truncate ${isMissed ? "text-rose-400" : "text-white"
+                                                }`}
                                         >
                                             {callUser.name}
                                         </h4>
@@ -248,6 +151,17 @@ export const CallHistoryList = ({ onOpenSettings }) => {
                                                 </span>
                                             )}
 
+                                            {/* Call Type Indicator */}
+                                            {call.callType === "video" ? (
+                                                <span className="text-[11px]" title="Video Call">
+                                                    📹
+                                                </span>
+                                            ) : (
+                                                <span className="text-[11px]" title="Audio Call">
+                                                    📞
+                                                </span>
+                                            )}
+
                                             <span className="text-[11px] text-zinc-400">
                                                 {formatCallTime(call.timestamp)}
                                             </span>
@@ -261,51 +175,65 @@ export const CallHistoryList = ({ onOpenSettings }) => {
                                     </div>
                                 </div>
 
-                                {/* Call Back Actions */}
-                                <div className="flex items-center gap-1 shrink-0 ml-2">
-                                    <button
-                                        type="button"
-                                        onClick={() => startCall(callUser, "audio")}
-                                        className="w-9 h-9 rounded-xl bg-purple-600/15 hover:bg-purple-600 text-purple-300 hover:text-white flex items-center justify-center transition-all cursor-pointer shadow-xs"
-                                        title="Audio Call"
-                                    >
-                                        <svg
-                                            xmlns="http://www.w3.org/2000/svg"
-                                            className="w-4 h-4"
-                                            fill="none"
-                                            viewBox="0 0 24 24"
-                                            stroke="currentColor"
+                                {/* Call Back Action - Only Audio if audio call, only Video if video call */}
+                                <div className="flex items-center shrink-0 ml-2">
+                                    {call.callType === "video" ? (
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                if (call.isGroupCall || callUser.isGroup) {
+                                                    startGroupCall(callUser, "video");
+                                                } else {
+                                                    startCall(callUser, "video");
+                                                }
+                                            }}
+                                            className="w-9 h-9 rounded-xl bg-purple-600/15 hover:bg-purple-600 text-purple-300 hover:text-white flex items-center justify-center transition-all cursor-pointer shadow-xs"
+                                            title="Video Call"
                                         >
-                                            <path
-                                                strokeLinecap="round"
-                                                strokeLinejoin="round"
-                                                strokeWidth={2}
-                                                d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"
-                                            />
-                                        </svg>
-                                    </button>
-
-                                    <button
-                                        type="button"
-                                        onClick={() => startCall(callUser, "video")}
-                                        className="w-9 h-9 rounded-xl bg-purple-600/15 hover:bg-purple-600 text-purple-300 hover:text-white flex items-center justify-center transition-all cursor-pointer shadow-xs"
-                                        title="Video Call"
-                                    >
-                                        <svg
-                                            xmlns="http://www.w3.org/2000/svg"
-                                            className="w-4 h-4"
-                                            fill="none"
-                                            viewBox="0 0 24 24"
-                                            stroke="currentColor"
+                                            <svg
+                                                xmlns="http://www.w3.org/2000/svg"
+                                                className="w-4 h-4"
+                                                fill="none"
+                                                viewBox="0 0 24 24"
+                                                stroke="currentColor"
+                                            >
+                                                <path
+                                                    strokeLinecap="round"
+                                                    strokeLinejoin="round"
+                                                    strokeWidth={2}
+                                                    d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
+                                                />
+                                            </svg>
+                                        </button>
+                                    ) : (
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                if (call.isGroupCall || callUser.isGroup) {
+                                                    startGroupCall(callUser, "audio");
+                                                } else {
+                                                    startCall(callUser, "audio");
+                                                }
+                                            }}
+                                            className="w-9 h-9 rounded-xl bg-purple-600/15 hover:bg-purple-600 text-purple-300 hover:text-white flex items-center justify-center transition-all cursor-pointer shadow-xs"
+                                            title="Audio Call"
                                         >
-                                            <path
-                                                strokeLinecap="round"
-                                                strokeLinejoin="round"
-                                                strokeWidth={2}
-                                                d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
-                                            />
-                                        </svg>
-                                    </button>
+                                            <svg
+                                                xmlns="http://www.w3.org/2000/svg"
+                                                className="w-4 h-4"
+                                                fill="none"
+                                                viewBox="0 0 24 24"
+                                                stroke="currentColor"
+                                            >
+                                                <path
+                                                    strokeLinecap="round"
+                                                    strokeLinejoin="round"
+                                                    strokeWidth={2}
+                                                    d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"
+                                                />
+                                            </svg>
+                                        </button>
+                                    )}
                                 </div>
                             </div>
                         );

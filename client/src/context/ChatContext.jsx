@@ -30,6 +30,68 @@ const ChatProvider = ({ children }) => {
     const [messagesLoading, setMessagesLoading] = useState(false);
     const [replyingTo, setReplyingTo] = useState(null);
 
+    // Multi-select messages state
+    const [selectedMessageIds, setSelectedMessageIds] = useState([]);
+
+    const toggleSelectMessage = (messageId) => {
+        if (!messageId) return;
+        setSelectedMessageIds((prev) =>
+            prev.includes(messageId)
+                ? prev.filter((id) => id !== messageId)
+                : [...prev, messageId]
+        );
+    };
+
+    const clearSelectedMessages = () => {
+        setSelectedMessageIds([]);
+    };
+
+    const selectAllMessages = () => {
+        const selectable = messages
+            .filter((m) => m.messageType !== "system" && !m.isDeleted && !m.deletedForEveryone)
+            .map((m) => m._id);
+        setSelectedMessageIds(selectable);
+    };
+
+    const deleteSelectedMessages = async (deleteType = "forMe") => {
+        if (selectedMessageIds.length === 0) return;
+        const ids = [...selectedMessageIds];
+        clearSelectedMessages();
+        for (const id of ids) {
+            await deleteMessage(id, deleteType);
+        }
+    };
+
+    const starSelectedMessages = async () => {
+        if (selectedMessageIds.length === 0) return;
+        const ids = [...selectedMessageIds];
+        for (const id of ids) {
+            await toggleStarMessage(id);
+        }
+        clearSelectedMessages();
+    };
+
+    const copySelectedMessages = () => {
+        if (selectedMessageIds.length === 0) return "";
+        const selectedMsgs = messages.filter((m) => selectedMessageIds.includes(m._id));
+        const textToCopy = selectedMsgs
+            .map((m) => m.text || (m.fileName ? `[File: ${m.fileName}]` : ""))
+            .filter(Boolean)
+            .join("\n");
+        if (textToCopy) {
+            navigator.clipboard.writeText(textToCopy);
+        }
+        return textToCopy;
+    };
+
+    // Blocked users state
+    const [blockedUsers, setBlockedUsers] = useState([]);
+    const blockedUsersRef = useRef([]);
+
+    useEffect(() => {
+        blockedUsersRef.current = blockedUsers;
+    }, [blockedUsers]);
+
     // Typing indicator state
     const [typingUsers, setTypingUsers] = useState({}); // { conversationId: { userId, userName } }
     const typingTimeoutRef = useRef(null);
@@ -86,6 +148,18 @@ const ChatProvider = ({ children }) => {
                 "New message received:",
                 message
             );
+
+            // If message is from a blocked user, drop it immediately
+            const senderId = (message.sender?._id || message.sender)?.toString();
+            if (
+                senderId &&
+                blockedUsersRef.current.some(
+                    (b) => (b?._id || b)?.toString() === senderId
+                )
+            ) {
+                console.log("Dropping message from blocked user:", senderId);
+                return;
+            }
 
             const convId = message.conversation?._id || message.conversation;
             let decryptedMessage = message;
@@ -218,16 +292,47 @@ const ChatProvider = ({ children }) => {
         const handleUserOnline = (data) => {
             const { userId: onlineUserId } = data;
 
-            // Update conversations list to reflect online status
+            // Update conversations list to reflect online status (unless blocked)
             setConversations((prev) =>
                 prev.map((conv) => {
                     if (conv.user?._id === onlineUserId) {
+                        if (conv.isBlockedByOther || conv.user?.isBlockedByOther) {
+                            return conv;
+                        }
                         return {
                             ...conv,
                             user: { ...conv.user, isOnline: true },
                         };
                     }
                     return conv;
+                })
+            );
+
+            setSelectedConversation((prev) => {
+                if (prev && prev.user?._id === onlineUserId) {
+                    if (prev.isBlockedByOther || prev.user?.isBlockedByOther) {
+                        return prev;
+                    }
+                    return {
+                        ...prev,
+                        user: { ...prev.user, isOnline: true },
+                    };
+                }
+                return prev;
+            });
+
+            setContacts((prev) =>
+                prev.map((c) => {
+                    if (c.user?._id === onlineUserId) {
+                        if (c.user?.isBlockedByOther) {
+                            return c;
+                        }
+                        return {
+                            ...c,
+                            user: { ...c.user, isOnline: true },
+                        };
+                    }
+                    return c;
                 })
             );
         };
@@ -238,6 +343,9 @@ const ChatProvider = ({ children }) => {
             setConversations((prev) =>
                 prev.map((conv) => {
                     if (conv.user?._id === offlineUserId) {
+                        if (conv.isBlockedByOther || conv.user?.isBlockedByOther) {
+                            return conv;
+                        }
                         return {
                             ...conv,
                             user: {
@@ -248,6 +356,42 @@ const ChatProvider = ({ children }) => {
                         };
                     }
                     return conv;
+                })
+            );
+
+            setSelectedConversation((prev) => {
+                if (prev && prev.user?._id === offlineUserId) {
+                    if (prev.isBlockedByOther || prev.user?.isBlockedByOther) {
+                        return prev;
+                    }
+                    return {
+                        ...prev,
+                        user: {
+                            ...prev.user,
+                            isOnline: false,
+                            lastSeen,
+                        },
+                    };
+                }
+                return prev;
+            });
+
+            setContacts((prev) =>
+                prev.map((c) => {
+                    if (c.user?._id === offlineUserId) {
+                        if (c.user?.isBlockedByOther) {
+                            return c;
+                        }
+                        return {
+                            ...c,
+                            user: {
+                                ...c.user,
+                                isOnline: false,
+                                lastSeen,
+                            },
+                        };
+                    }
+                    return c;
                 })
             );
         };
@@ -829,6 +973,7 @@ const ChatProvider = ({ children }) => {
 
     const selectConversation = async (conversation) => {
         setReplyingTo(null);
+        setSelectedMessageIds([]);
 
         if (conversation) {
             let convToSet = conversation;
@@ -991,12 +1136,19 @@ const ChatProvider = ({ children }) => {
             const response = await api.delete(`/conversations/group/${groupId}/members/${memberId}`);
             if (response.data.success) {
                 const { conversation: updated, removedMemberId } = response.data;
-                if (removedMemberId === user._id) {
-                    // Current user left
-                    setConversations((prev) => prev.filter((c) => c._id !== groupId));
+                const isMe = (removedMemberId?._id || removedMemberId)?.toString() === user?._id?.toString();
+                if (isMe) {
+                    // Current user left: update with isLeft: true so user can still view history
+                    const leftConv = {
+                        ...updated,
+                        isLeft: true,
+                        user: { ...updated.user, isLeft: true },
+                    };
+                    setConversations((prev) =>
+                        prev.map((c) => (c._id === groupId ? leftConv : c))
+                    );
                     if (selectedConversation?._id === groupId) {
-                        setSelectedConversation(null);
-                        setMessages([]);
+                        setSelectedConversation(leftConv);
                     }
                 } else {
                     setConversations((prev) =>
@@ -1010,6 +1162,24 @@ const ChatProvider = ({ children }) => {
             }
         } catch (error) {
             console.error("Remove group member error:", error);
+            throw error;
+        }
+    };
+
+    const deleteConversation = async (conversationId) => {
+        if (!conversationId) return;
+        try {
+            const response = await api.delete(`/conversations/${conversationId}`);
+            if (response.data.success) {
+                setConversations((prev) => prev.filter((c) => c._id !== conversationId));
+                if (selectedConversation?._id === conversationId) {
+                    setSelectedConversation(null);
+                    setMessages([]);
+                }
+                return response.data;
+            }
+        } catch (error) {
+            console.error("Delete conversation error:", error);
             throw error;
         }
     };
@@ -1042,12 +1212,63 @@ const ChatProvider = ({ children }) => {
         }
     }, [user]);
 
+    const getBlockedUsers = useCallback(async () => {
+        try {
+            const res = await api.get("/auth/blocked/all");
+            if (res.data.success) {
+                setBlockedUsers(res.data.blockedUsers || []);
+            }
+        } catch (err) {
+            console.error("Failed to fetch blocked users:", err);
+        }
+    }, []);
+
     useEffect(() => {
         if (user) {
-            getContacts();
+            getBlockedUsers();
+        } else {
+            setBlockedUsers([]);
         }
-    }, [user]);
+    }, [user, getBlockedUsers]);
 
+    const toggleBlockUser = async (userId) => {
+        try {
+            const res = await api.post(`/auth/block/${userId}`);
+            if (res.data.success) {
+                await getBlockedUsers();
+                return res.data;
+            }
+        } catch (err) {
+            console.error("Failed to toggle block:", err);
+            throw err;
+        }
+    };
+
+    const isUserBlocked = useCallback(
+        (userId) => {
+            if (!userId) return false;
+            const targetId = (userId?._id || userId).toString();
+            return blockedUsers.some((b) => (b?._id || b).toString() === targetId);
+        },
+        [blockedUsers]
+    );
+
+    const clearChat = async (conversationId) => {
+        if (!conversationId) return;
+        try {
+            const response = await api.post(`/messages/clear/${conversationId}`);
+            if (response.data.success) {
+                if (selectedConversation?._id === conversationId) {
+                    setMessages([]);
+                }
+                await getConversations();
+                return response.data;
+            }
+        } catch (error) {
+            console.error("Clear chat error:", error);
+            throw error;
+        }
+    };
 
     const value = {
         // Conversations
@@ -1055,6 +1276,7 @@ const ChatProvider = ({ children }) => {
         loading,
         getConversations,
         openConversation,
+        deleteConversation,
 
         // Messages
         messages,
@@ -1070,9 +1292,25 @@ const ChatProvider = ({ children }) => {
         togglePinConversation,
         togglePinMessage,
         forwardMessage,
+        clearChat,
         replyingTo,
         setReplyingTo,
         clearReplyingTo: () => setReplyingTo(null),
+
+        // Multi-select messages
+        selectedMessageIds,
+        toggleSelectMessage,
+        clearSelectedMessages,
+        selectAllMessages,
+        deleteSelectedMessages,
+        starSelectedMessages,
+        copySelectedMessages,
+
+        // Blocked users
+        blockedUsers,
+        getBlockedUsers,
+        toggleBlockUser,
+        isUserBlocked,
 
         // Group chats
         createGroup,

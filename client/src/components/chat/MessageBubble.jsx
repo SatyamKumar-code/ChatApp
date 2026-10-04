@@ -1,7 +1,15 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useContext } from "react";
 import AudioPlayer from "./AudioPlayer";
+import Avatar from "../common/Avatar";
+import { CallContext } from "../../context/CallContext";
+import { ChatContext } from "../../context/ChatContext";
 
-const QUICK_REACTIONS = ["❤️", "👍", "😂", "😮", "😢", "🙏"];
+const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
+const EXTRA_REACTIONS = [
+    "🔥", "🎉", "👏", "💯", "🥰", "🤩", "🤝", "💔",
+    "👀", "🚀", "✨", "🤔", "😎", "🙌", "🥳", "😍",
+    "💪", "💡", "😭", "🤯", "🫡", "🤮", "🥺", "😇"
+];
 
 const formatBytes = (bytes) => {
     if (!bytes || bytes === 0) return "";
@@ -14,6 +22,7 @@ const formatBytes = (bytes) => {
 export const MessageBubble = ({
     message,
     isMyMessage,
+    isGroup = false,
     currentUserId,
     onReply,
     onForward,
@@ -24,26 +33,95 @@ export const MessageBubble = ({
     isPinned = false,
     searchHighlight = "",
 }) => {
-    const [showImagePreview, setShowImagePreview] = useState(false);
-    const [showActions, setShowActions] = useState(false);
-    const [showDeleteMenu, setShowDeleteMenu] = useState(false);
-    const [copied, setCopied] = useState(false);
-    const actionMenuRef = useRef(null);
+    const { selectedMessageIds, toggleSelectMessage } = useContext(ChatContext) || {};
+    const isSelectionMode = Boolean(selectedMessageIds && selectedMessageIds.length > 0);
+    const isSelected = Boolean(selectedMessageIds && selectedMessageIds.includes(message._id));
 
-    // Close delete menu when clicking outside
+    const [showImagePreview, setShowImagePreview] = useState(false);
+    const [showReactions, setShowReactions] = useState(false);
+    const [showMenu, setShowMenu] = useState(false);
+    const [showExtraReactions, setShowExtraReactions] = useState(false);
+    const [copied, setCopied] = useState(false);
+    const reactionsRef = useRef(null);
+    const menuRef = useRef(null);
+
+    // Long press detection for mobile devices
+    const touchTimerRef = useRef(null);
+    const touchStartPosRef = useRef({ x: 0, y: 0 });
+    const isLongPressTriggeredRef = useRef(false);
+
+    const handleTouchStart = (e) => {
+        if (message.messageType === "system") return;
+        const touch = e.touches[0];
+        touchStartPosRef.current = { x: touch.clientX, y: touch.clientY };
+        isLongPressTriggeredRef.current = false;
+
+        touchTimerRef.current = setTimeout(() => {
+            isLongPressTriggeredRef.current = true;
+            if (navigator.vibrate) {
+                try {
+                    navigator.vibrate(40);
+                } catch (err) {}
+            }
+            // Open quick reaction bar on long press
+            setShowReactions(true);
+            // Select message for multi-select
+            if (toggleSelectMessage) {
+                toggleSelectMessage(message._id);
+            }
+        }, 450);
+    };
+
+    const handleTouchMove = (e) => {
+        if (!touchTimerRef.current) return;
+        const touch = e.touches[0];
+        const dx = Math.abs(touch.clientX - touchStartPosRef.current.x);
+        const dy = Math.abs(touch.clientY - touchStartPosRef.current.y);
+        if (dx > 10 || dy > 10) {
+            clearTimeout(touchTimerRef.current);
+            touchTimerRef.current = null;
+        }
+    };
+
+    const handleTouchEnd = () => {
+        if (touchTimerRef.current) {
+            clearTimeout(touchTimerRef.current);
+            touchTimerRef.current = null;
+        }
+    };
+
+    const handleClickMessage = (e) => {
+        if (isLongPressTriggeredRef.current) {
+            isLongPressTriggeredRef.current = false;
+            return;
+        }
+        if (isSelectionMode && toggleSelectMessage) {
+            e.preventDefault();
+            e.stopPropagation();
+            toggleSelectMessage(message._id);
+        }
+    };
+
+    // Close delete menu or extra reactions when clicking outside
     useEffect(() => {
         const handleClickOutside = (e) => {
-            if (actionMenuRef.current && !actionMenuRef.current.contains(e.target)) {
-                setShowDeleteMenu(false);
+            if (reactionsRef.current && !reactionsRef.current.contains(e.target)) {
+                setShowReactions(false);
+                setShowExtraReactions(false);
+            }
+            if (menuRef.current && !menuRef.current.contains(e.target)) {
+                setShowMenu(false);
             }
         };
-        if (showDeleteMenu) {
+        if (showReactions || showMenu || showExtraReactions) {
             document.addEventListener("mousedown", handleClickOutside);
+            document.addEventListener("touchstart", handleClickOutside);
         }
         return () => {
             document.removeEventListener("mousedown", handleClickOutside);
+            document.removeEventListener("touchstart", handleClickOutside);
         };
-    }, [showDeleteMenu]);
+    }, [showReactions, showMenu, showExtraReactions]);
 
     const formatTime = (date) => {
         if (!date) return "";
@@ -88,19 +166,248 @@ export const MessageBubble = ({
         setTimeout(() => setCopied(false), 2000);
     };
 
+    const { startCall, startGroupCall } = useContext(CallContext) || {};
+
+    // If system audit message (e.g. user added/removed, group info/settings changed)
+    if (message.messageType === "system") {
+        return (
+            <div className="flex items-center justify-center my-3 select-none px-4 w-full animate-in fade-in duration-200">
+                <div className="max-w-md px-3.5 py-1.5 rounded-full bg-[#16162a]/95 border border-white/10 text-center text-[11px] font-medium text-zinc-300 shadow-md flex items-center justify-center gap-1.5 backdrop-blur-md">
+                    <span>{message.text}</span>
+                </div>
+            </div>
+        );
+    }
+
+    // If Call History / Log Message (1-on-1 audio/video call, missed call, group call)
+    if (message.messageType === "call") {
+        const details = message.callDetails || {};
+        const isVideo =
+            details.callType === "video" ||
+            message.text?.toLowerCase().includes("video");
+        const isMissed =
+            details.status === "missed" ||
+            message.text?.toLowerCase().includes("missed");
+        const isDeclined =
+            details.status === "rejected" ||
+            message.text?.toLowerCase().includes("declined");
+        const isGroupCallType = Boolean(
+            details.isGroupCall || message.text?.toLowerCase().includes("group")
+        );
+
+        const callTitle = isGroupCallType
+            ? `Group ${isVideo ? "Video" : "Audio"} Call`
+            : isMissed
+            ? `Missed ${isVideo ? "Video" : "Audio"} Call`
+            : isDeclined
+            ? `Declined ${isVideo ? "Video" : "Audio"} Call`
+            : `${isVideo ? "Video" : "Audio"} Call`;
+
+        const durationStr =
+            details.duration > 0
+                ? `${Math.floor(details.duration / 60)}m ${details.duration % 60}s`
+                : isMissed
+                ? "Missed"
+                : isDeclined
+                ? "Declined"
+                : "";
+
+        return (
+            <div
+                onTouchStart={handleTouchStart}
+                onTouchMove={handleTouchMove}
+                onTouchEnd={handleTouchEnd}
+                onTouchCancel={handleTouchEnd}
+                onClick={handleClickMessage}
+                onContextMenu={(e) => {
+                    e.preventDefault();
+                    toggleSelectMessage && toggleSelectMessage(message._id);
+                }}
+                className={`flex w-full mb-3 items-center gap-2 cursor-pointer ${
+                    isMyMessage ? "justify-end" : "justify-start"
+                } ${
+                    isSelected
+                        ? "bg-purple-600/15 rounded-2xl py-1 px-1.5"
+                        : ""
+                }`}
+            >
+                {isGroup && !isMyMessage && (
+                    <Avatar
+                        src={message.sender?.profilePicture}
+                        name={message.sender?.name}
+                        size={28}
+                        className="shrink-0 mt-0.5"
+                        showStatus={false}
+                    />
+                )}
+                <div
+                    className={`max-w-[85%] sm:max-w-[70%] md:max-w-[320px] rounded-2xl p-3 border select-none transition-all shadow-lg ${
+                        isMyMessage
+                            ? "bg-[#1d1736] border-purple-500/30 text-white rounded-tr-xs"
+                            : "bg-[#151528] border-white/10 text-white rounded-tl-xs"
+                    }`}
+                >
+                    <div className="flex items-center gap-3">
+                        {/* Call Icon Badge */}
+                        <div
+                            className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 shadow-inner ${
+                                isMissed
+                                    ? "bg-rose-500/20 text-rose-400 border border-rose-500/30"
+                                    : "bg-purple-600/20 text-purple-300 border border-purple-500/30"
+                            }`}
+                        >
+                            {isVideo ? (
+                                <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    className="w-5 h-5"
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                    stroke="currentColor"
+                                >
+                                    <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        strokeWidth={2}
+                                        d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
+                                    />
+                                </svg>
+                            ) : (
+                                <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    className="w-5 h-5"
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                    stroke="currentColor"
+                                >
+                                    <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        strokeWidth={2}
+                                        d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"
+                                    />
+                                </svg>
+                            )}
+                        </div>
+
+                        {/* Call Info */}
+                        <div className="flex-1 min-w-0">
+                            <h4
+                                className={`text-xs font-bold truncate ${
+                                    isMissed ? "text-rose-400" : "text-white"
+                                }`}
+                            >
+                                {callTitle}
+                            </h4>
+                            <div className="flex items-center gap-1.5 text-[11px] text-zinc-400 mt-0.5">
+                                <span
+                                    className={
+                                        isMissed
+                                            ? "text-rose-400 font-bold"
+                                            : isMyMessage
+                                            ? "text-cyan-400 font-bold"
+                                            : "text-emerald-400 font-bold"
+                                    }
+                                >
+                                    {isMissed ? "↙" : isMyMessage ? "↗" : "↙"}
+                                </span>
+                                <span>{durationStr || (isMissed ? "Missed" : "Call ended")}</span>
+                            </div>
+                        </div>
+
+                        {/* Call Back Button */}
+                        <button
+                            type="button"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                if (isGroupCallType && startGroupCall) {
+                                    startGroupCall(
+                                        { _id: message.conversation },
+                                        isVideo ? "video" : "audio"
+                                    );
+                                } else if (startCall) {
+                                    const target = isMyMessage
+                                        ? message.receiver
+                                        : message.sender;
+                                    if (target) {
+                                        startCall(target, isVideo ? "video" : "audio");
+                                    }
+                                }
+                            }}
+                            className="w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 active:scale-95 text-white flex items-center justify-center transition-all shrink-0 cursor-pointer shadow-xs"
+                            title="Call back"
+                        >
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                className="w-4 h-4"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                            >
+                                <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={2}
+                                    d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"
+                                />
+                            </svg>
+                        </button>
+                    </div>
+
+                    {/* Bottom Time & Ticks */}
+                    <div className="flex items-center justify-end gap-1 mt-2 pt-1 border-t border-white/5 text-[10px] text-zinc-400">
+                        <span>{formatTime(message.createdAt)}</span>
+                        {isMyMessage && (
+                            <span
+                                className={
+                                    message.isSeen
+                                        ? "text-cyan-400 font-bold"
+                                        : "text-zinc-500"
+                                }
+                            >
+                                {message.isSeen ? "✓✓" : message.isDelivered ? "✓✓" : "✓"}
+                            </span>
+                        )}
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
     // If message is deleted
     if (message.isDeleted || message.deletedForEveryone) {
         return (
             <div
-                className={`flex w-full mb-3 ${
+                onTouchStart={handleTouchStart}
+                onTouchMove={handleTouchMove}
+                onTouchEnd={handleTouchEnd}
+                onTouchCancel={handleTouchEnd}
+                onClick={handleClickMessage}
+                onContextMenu={(e) => {
+                    e.preventDefault();
+                    toggleSelectMessage && toggleSelectMessage(message._id);
+                }}
+                className={`flex w-full mb-3 items-center gap-2 cursor-pointer ${
                     isMyMessage ? "justify-end" : "justify-start"
+                } ${
+                    isSelected
+                        ? "bg-purple-600/15 rounded-2xl py-1 px-1.5"
+                        : ""
                 }`}
             >
+                {isGroup && !isMyMessage && (
+                    <Avatar
+                        src={message.sender?.profilePicture}
+                        name={message.sender?.name}
+                        size={28}
+                        className="shrink-0 mt-0.5"
+                        showStatus={false}
+                    />
+                )}
                 <div
                     className={`max-w-[85%] sm:max-w-[70%] md:max-w-[55%] rounded-2xl px-3.5 py-2.5 text-xs italic flex items-center gap-2 border select-none transition-all ${
                         isMyMessage
-                            ? "bg-purple-950/20 border-purple-800/25 text-purple-300/70 rounded-br-xs"
-                            : "bg-[#141426] border-white/5 text-zinc-500 rounded-bl-xs"
+                            ? "bg-purple-950/20 border-purple-800/25 text-purple-300/70 rounded-tr-xs"
+                            : "bg-[#141426] border-white/5 text-zinc-500 rounded-tl-xs"
                     }`}
                 >
                     <svg
@@ -169,399 +476,78 @@ export const MessageBubble = ({
         <>
             <div
                 id={`msg-${message._id}`}
-                onMouseEnter={() => setShowActions(true)}
-                onMouseLeave={() => {
-                    setShowActions(false);
-                    setShowDeleteMenu(false);
+                onTouchStart={handleTouchStart}
+                onTouchMove={handleTouchMove}
+                onTouchEnd={handleTouchEnd}
+                onTouchCancel={handleTouchEnd}
+                onContextMenu={(e) => {
+                    e.preventDefault();
+                    if (isSelectionMode) {
+                        toggleSelectMessage && toggleSelectMessage(message._id);
+                    } else {
+                        setShowMenu((prev) => !prev);
+                        setShowReactions(false);
+                    }
                 }}
-                className={`flex flex-col w-full mb-3 group relative transition-all ${
+                onMouseLeave={() => {
+                    if (!showMenu && !showExtraReactions) {
+                        setShowReactions(false);
+                    }
+                }}
+                className={`flex flex-col w-full mb-2 group relative transition-all ${
                     isMyMessage ? "items-end" : "items-start"
+                } ${
+                    isSelected
+                        ? "bg-purple-600/15 rounded-2xl py-1 px-1.5 sm:px-2"
+                        : ""
                 }`}
             >
-                {/* Floating Quick Action Bar (on hover or active) */}
+                {/* Floating Quick Emoji Reactions Pill ONLY */}
                 <div
-                    ref={actionMenuRef}
-                    className={`absolute -top-7 z-20 flex items-center gap-0.5 px-1.5 py-1 rounded-full bg-[#1e1e38]/95 backdrop-blur-md border border-white/10 shadow-lg text-zinc-300 transition-all duration-150 ${
-                        showActions || showDeleteMenu
-                            ? "opacity-100 pointer-events-auto translate-y-0"
-                            : "opacity-0 pointer-events-none translate-y-1"
+                    ref={reactionsRef}
+                    className={`absolute -top-9 z-30 flex items-center gap-1 px-2.5 py-1.5 rounded-full bg-[#18182f]/98 backdrop-blur-xl border border-white/15 shadow-2xl shadow-black/80 text-zinc-300 transition-all duration-200 ease-out ${
+                        showReactions || showExtraReactions
+                            ? "opacity-100 pointer-events-auto scale-100 translate-y-0"
+                            : "opacity-0 pointer-events-none scale-95 translate-y-2"
                     } ${isMyMessage ? "right-2" : "left-2"}`}
                 >
-                    {/* Quick Reactions */}
-                    <div className="flex items-center gap-0.5 pr-1 border-r border-white/10">
-                        {QUICK_REACTIONS.map((emoji) => (
-                            <button
-                                key={emoji}
-                                onClick={() => onReact && onReact(message._id, emoji)}
-                                className="w-6 h-6 flex items-center justify-center hover:scale-125 transition-transform text-xs"
-                                title={`React ${emoji}`}
-                            >
-                                {emoji}
-                            </button>
-                        ))}
-                    </div>
-
-                    {/* Reply Button */}
-                    <button
-                        onClick={() => onReply && onReply(message)}
-                        className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/10 hover:text-white transition-colors"
-                        title="Reply"
-                    >
-                        <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            className="w-3.5 h-3.5"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                        >
-                            <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={2}
-                                d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"
-                            />
-                        </svg>
-                    </button>
-
-                    {/* Forward Button */}
-                    <button
-                        onClick={() => onForward && onForward(message)}
-                        className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/10 hover:text-white transition-colors"
-                        title="Forward"
-                    >
-                        <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            className="w-3.5 h-3.5"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                            strokeWidth={2}
-                        >
-                            <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"
-                                className="rotate-180 origin-center"
-                            />
-                        </svg>
-                    </button>
-
-                    {/* Copy Text Button (if text exists) */}
-                    {message.text && (
-                        <button
-                            onClick={handleCopy}
-                            className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/10 hover:text-white transition-colors"
-                            title={copied ? "Copied!" : "Copy message"}
-                        >
-                            {copied ? (
-                                <svg
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    className="w-3.5 h-3.5 text-emerald-400"
-                                    fill="none"
-                                    viewBox="0 0 24 24"
-                                    stroke="currentColor"
-                                >
-                                    <path
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        strokeWidth={2}
-                                        d="M5 13l4 4L19 7"
-                                    />
-                                </svg>
-                            ) : (
-                                <svg
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    className="w-3.5 h-3.5"
-                                    fill="none"
-                                    viewBox="0 0 24 24"
-                                    stroke="currentColor"
-                                >
-                                    <path
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        strokeWidth={2}
-                                        d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
-                                    />
-                                </svg>
-                            )}
-                        </button>
-                    )}
-
-                    {/* Star / Unstar Message Button */}
-                    <button
-                        onClick={() => onToggleStar && onToggleStar(message._id)}
-                        className={`w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/10 transition-colors ${
-                            isStarredByMe ? "text-amber-400" : "hover:text-amber-300"
-                        }`}
-                        title={isStarredByMe ? "Unstar message" : "Star message"}
-                    >
-                        <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            className="w-3.5 h-3.5"
-                            fill={isStarredByMe ? "currentColor" : "none"}
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                        >
-                            <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={2}
-                                d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"
-                            />
-                        </svg>
-                    </button>
-
-                    {/* Pin / Unpin Message Button */}
-                    <button
-                        onClick={() => onTogglePin && onTogglePin(message._id)}
-                        className={`w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/10 transition-colors ${
-                            isPinned ? "text-purple-400" : "hover:text-purple-300"
-                        }`}
-                        title={isPinned ? "Unpin message" : "Pin message"}
-                    >
-                        <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            className="w-3.5 h-3.5"
-                            viewBox="0 0 24 24"
-                            fill={isPinned ? "currentColor" : "none"}
-                            stroke="currentColor"
-                            strokeWidth={2}
-                        >
-                            <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                d="M16 12V4h1V2H7v2h1v8l-2 3v2h5.2v5l.8.8.8-.8v-5H18v-2l-2-3z"
-                            />
-                        </svg>
-                    </button>
-
-                    {/* Delete Message Popover */}
-                    <div className="relative">
-                        <button
-                            onClick={() => setShowDeleteMenu(!showDeleteMenu)}
-                            className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-red-500/20 hover:text-red-300 transition-colors"
-                            title="Delete options"
-                        >
-                            <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                className="w-3.5 h-3.5"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                stroke="currentColor"
-                            >
-                                <path
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    strokeWidth={2}
-                                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                                />
-                            </svg>
-                        </button>
-
-                        {/* Dropdown Menu */}
-                        {showDeleteMenu && (
-                            <div
-                                className={`absolute bottom-full mb-2 z-30 w-44 rounded-xl bg-[#1a1a32] border border-white/10 shadow-2xl py-1 text-xs text-zinc-200 animate-in fade-in duration-100 ${
-                                    isMyMessage ? "right-0" : "left-0"
-                                }`}
-                            >
+                    {/* 1. WhatsApp Quick Emoji Reactions Pill */}
+                    <div className="flex items-center gap-1">
+                        {QUICK_REACTIONS.map((emoji) => {
+                            const isReacted = reactionGroups[emoji]?.reactedByMe;
+                            return (
                                 <button
+                                    key={emoji}
+                                    type="button"
                                     onClick={() => {
-                                        setShowDeleteMenu(false);
-                                        onDelete && onDelete(message._id, "forMe");
+                                        onReact && onReact(message._id, emoji);
+                                        setShowReactions(false);
+                                        setShowExtraReactions(false);
                                     }}
-                                    className="w-full text-left px-3 py-2 hover:bg-white/10 flex items-center gap-2 text-zinc-300 hover:text-white transition-colors"
+                                    className={`w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center text-lg sm:text-xl rounded-full transition-all duration-150 ease-out transform hover:scale-135 hover:-translate-y-1 active:scale-105 cursor-pointer ${
+                                        isReacted
+                                            ? "bg-purple-500/30 ring-1 ring-purple-400/60 scale-110"
+                                            : "hover:bg-white/10"
+                                    }`}
+                                    title={`React ${emoji}`}
                                 >
-                                    <svg
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        className="w-3.5 h-3.5 text-zinc-400"
-                                        fill="none"
-                                        viewBox="0 0 24 24"
-                                        stroke="currentColor"
-                                    >
-                                        <path
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                            strokeWidth={2}
-                                            d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
-                                        />
-                                    </svg>
-                                    Delete for me
+                                    <span>{emoji}</span>
                                 </button>
+                            );
+                        })}
 
-                                {isMyMessage && (
-                                    <button
-                                        onClick={() => {
-                                            setShowDeleteMenu(false);
-                                            onDelete && onDelete(message._id, "forEveryone");
-                                        }}
-                                        className="w-full text-left px-3 py-2 hover:bg-red-500/15 flex items-center gap-2 text-red-400 hover:text-red-300 transition-colors"
-                                    >
-                                        <svg
-                                            xmlns="http://www.w3.org/2000/svg"
-                                            className="w-3.5 h-3.5 text-red-400"
-                                            fill="none"
-                                            viewBox="0 0 24 24"
-                                            stroke="currentColor"
-                                        >
-                                            <path
-                                                strokeLinecap="round"
-                                                strokeLinejoin="round"
-                                                strokeWidth={2}
-                                                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                                            />
-                                        </svg>
-                                        Delete for everyone
-                                    </button>
-                                )}
-                            </div>
-                        )}
-                    </div>
-                </div>
-
-                {/* Message Bubble Card */}
-                <div
-                    className={`max-w-[85%] sm:max-w-[70%] md:max-w-[60%] rounded-2xl p-2.5 sm:px-3.5 sm:py-2.5 shadow-sm text-sm relative transition-all duration-200 ${
-                        isMyMessage
-                            ? "bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-br-xs shadow-purple-900/20"
-                            : "bg-[#181830] text-zinc-100 rounded-bl-xs border border-white/5 shadow-black/20"
-                    }`}
-                >
-                    {/* Sender Name for received in group/chats */}
-                    {!isMyMessage && message.sender?.name && (
-                        <div className="text-[11px] font-semibold text-purple-300 mb-1 select-none">
-                            {message.sender.name}
-                        </div>
-                    )}
-
-                    {/* Forwarded Header Indicator */}
-                    {message.isForwarded && (
-                        <div
-                            className={`flex items-center gap-1 text-[11px] italic mb-1.5 select-none ${
-                                isMyMessage ? "text-purple-200/90" : "text-zinc-400"
-                            }`}
-                        >
-                            <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                className={`w-3 h-3 ${isMyMessage ? "text-purple-200/90" : "text-zinc-400"}`}
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                stroke="currentColor"
-                                strokeWidth={2}
+                        {/* WhatsApp '+' Button to pick extra emojis */}
+                        <div className="relative">
+                            <button
+                                type="button"
+                                onClick={() => setShowExtraReactions(!showExtraReactions)}
+                                className={`w-7 h-7 rounded-full flex items-center justify-center transition-all cursor-pointer text-xs font-bold ${
+                                    showExtraReactions
+                                        ? "bg-purple-600 text-white scale-110"
+                                        : "bg-white/10 hover:bg-white/20 text-zinc-300 hover:text-white"
+                                }`}
+                                title="More reactions"
                             >
-                                <path
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"
-                                    className="rotate-180 origin-center"
-                                />
-                            </svg>
-                            <span>Forwarded</span>
-                        </div>
-                    )}
-
-                    {/* Quoted Replying Header */}
-                    {message.replyTo && (
-                        <div
-                            onClick={() => scrollToRepliedMessage(message.replyTo._id)}
-                            className={`mb-2 p-2 rounded-xl text-xs border-l-4 cursor-pointer transition-all ${
-                                isMyMessage
-                                    ? "bg-black/25 border-white/90 hover:bg-black/35 text-white/95"
-                                    : "bg-black/30 border-purple-500 hover:bg-black/45 text-zinc-300"
-                            }`}
-                        >
-                            <div className="font-semibold text-[11px] text-purple-300 mb-0.5 truncate flex items-center gap-1">
-                                <svg
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    className="w-3 h-3 text-purple-400"
-                                    fill="none"
-                                    viewBox="0 0 24 24"
-                                    stroke="currentColor"
-                                >
-                                    <path
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        strokeWidth={2}
-                                        d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"
-                                    />
-                                </svg>
-                                <span>{message.replyTo.sender?.name || "Replying to"}</span>
-                            </div>
-                            <div className="truncate text-[11px] opacity-80">
-                                {message.replyTo.messageType === "image" && "📷 Photo"}
-                                {message.replyTo.messageType === "audio" && "🎤 Voice note"}
-                                {message.replyTo.messageType === "file" &&
-                                    `📄 ${message.replyTo.fileName || "Document"}`}
-                                {(!message.replyTo.messageType ||
-                                    message.replyTo.messageType === "text") &&
-                                    (message.replyTo.text || "Message")}
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Voice Note Audio Attachment */}
-                    {isAudio && message.fileUrl && (
-                        <div className="mb-1">
-                            <AudioPlayer
-                                audioUrl={message.fileUrl}
-                                duration={message.duration}
-                                isMyMessage={isMyMessage}
-                            />
-                        </div>
-                    )}
-
-                    {/* Image Attachment */}
-                    {isImage && message.fileUrl && (
-                        <div className="mb-2 rounded-xl overflow-hidden cursor-pointer group/img relative">
-                            <img
-                                src={message.fileUrl}
-                                alt={message.fileName || "Shared image"}
-                                onClick={() => setShowImagePreview(true)}
-                                className="w-full max-h-80 object-cover rounded-xl transition-transform duration-200 group-hover/img:scale-[1.01]"
-                                loading="lazy"
-                            />
-                            <div className="absolute inset-0 bg-black/0 group-hover/img:bg-black/10 transition-colors flex items-center justify-center opacity-0 group-hover/img:opacity-100">
-                                <span className="px-2.5 py-1 rounded-full bg-black/60 text-white text-[11px] font-medium backdrop-blur-md">
-                                    Click to view
-                                </span>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Document / File Attachment */}
-                    {isFile && message.fileUrl && (
-                        <a
-                            href={message.fileUrl}
-                            download={message.fileName || "attachment"}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex items-center gap-3 p-2.5 mb-2 rounded-xl bg-black/25 hover:bg-black/40 border border-white/10 transition-all group/doc"
-                        >
-                            <div className="w-10 h-10 rounded-lg bg-purple-500/20 text-purple-300 flex items-center justify-center shrink-0 group-hover/doc:scale-105 transition-transform">
-                                <svg
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    className="w-5 h-5"
-                                    fill="none"
-                                    viewBox="0 0 24 24"
-                                    stroke="currentColor"
-                                >
-                                    <path
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        strokeWidth={2}
-                                        d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                                    />
-                                </svg>
-                            </div>
-                            <div className="flex-1 min-w-0">
-                                <p className="text-xs font-semibold text-white truncate group-hover/doc:underline">
-                                    {message.fileName || "Download Document"}
-                                </p>
-                                <p className="text-[10px] text-zinc-400 mt-0.5 font-mono">
-                                    {formatBytes(message.fileSize) || "File"}
-                                </p>
-                            </div>
-                            <div className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center text-zinc-300 group-hover/doc:text-white shrink-0">
                                 <svg
                                     xmlns="http://www.w3.org/2000/svg"
                                     className="w-4 h-4"
@@ -572,90 +558,532 @@ export const MessageBubble = ({
                                     <path
                                         strokeLinecap="round"
                                         strokeLinejoin="round"
-                                        strokeWidth={2}
-                                        d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                                        strokeWidth={2.5}
+                                        d="M12 4v16m8-8H4"
                                     />
                                 </svg>
-                            </div>
-                        </a>
+                            </button>
+
+                            {/* Extended Emoji Tray Popup */}
+                            {showExtraReactions && (
+                                <div
+                                    className={`absolute bottom-full mb-2.5 z-40 p-2.5 rounded-2xl bg-[#14142a]/98 backdrop-blur-xl border border-white/15 shadow-2xl animate-in fade-in zoom-in-95 duration-150 w-56 sm:w-64 grid grid-cols-6 gap-1.5 ${
+                                        isMyMessage ? "right-0" : "left-0"
+                                    }`}
+                                >
+                                    {EXTRA_REACTIONS.map((em) => {
+                                        const isReacted = reactionGroups[em]?.reactedByMe;
+                                        return (
+                                            <button
+                                                key={em}
+                                                type="button"
+                                                onClick={() => {
+                                                    onReact && onReact(message._id, em);
+                                                    setShowReactions(false);
+                                                    setShowExtraReactions(false);
+                                                }}
+                                                className={`w-8 h-8 flex items-center justify-center text-lg rounded-xl transition-all duration-150 transform hover:scale-130 active:scale-100 cursor-pointer ${
+                                                    isReacted
+                                                        ? "bg-purple-500/30 ring-1 ring-purple-400"
+                                                        : "hover:bg-white/10"
+                                                }`}
+                                            >
+                                                {em}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+
+                {/* Message Bubble Container with Avatar for Group Chats, Selection Checkbox & Side Emoji Button */}
+                <div
+                    className={`flex items-center gap-2 max-w-[90%] sm:max-w-[75%] md:max-w-[65%] ${
+                        isMyMessage ? "flex-row-reverse self-end" : "flex-row self-start"
+                    }`}
+                >
+                    {isGroup && !isMyMessage && (
+                        <Avatar
+                            src={message.sender?.profilePicture}
+                            name={message.sender?.name}
+                            size={30}
+                            className="shrink-0 self-start mt-0.5"
+                            showStatus={false}
+                        />
                     )}
 
-                    {/* Message Body / Caption */}
-                    {message.text && (
-                        <p className="whitespace-pre-wrap break-words leading-relaxed text-[13px] md:text-sm">
-                            {renderHighlightedText(message.text, searchHighlight)}
-                        </p>
-                    )}
-
-                    {/* Message Footer: Timestamp & Status & Star */}
+                    {/* Message Bubble Card */}
                     <div
-                        className={`flex items-center justify-end gap-1.5 mt-1 select-none text-[10px] ${
-                            isMyMessage ? "text-purple-200" : "text-zinc-400"
+                        className={`w-full rounded-2xl p-2.5 sm:px-3.5 sm:py-2.5 shadow-sm text-sm relative transition-all duration-200 ${
+                            isMyMessage
+                                ? "bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-tr-xs shadow-purple-900/20"
+                                : "bg-[#181830] text-zinc-100 rounded-tl-xs border border-white/5 shadow-black/20"
                         }`}
                     >
-                        {/* Pinned Indicator Badge */}
-                        {isPinned && (
-                            <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                className="w-3 h-3 text-purple-400 fill-purple-400 shrink-0"
-                                viewBox="0 0 24 24"
-                                title="Pinned message"
-                            >
-                                <path d="M16 12V4h1V2H7v2h1v8l-2 3v2h5.2v5l.8.8.8-.8v-5H18v-2l-2-3z" />
-                            </svg>
+                        {/* Sender Name ONLY for received messages in Group Chat */}
+                        {isGroup && !isMyMessage && message.sender?.name && (
+                            <div className="text-[11px] font-semibold text-purple-300 mb-1 select-none">
+                                {message.sender.name}
+                            </div>
                         )}
 
-                        {/* Starred Indicator Badge */}
-                        {isStarredByMe && (
+                        {/* Forwarded Header Indicator */}
+                        {message.isForwarded && (
+                            <div
+                                className={`flex items-center gap-1 text-[11px] italic mb-1.5 select-none ${isMyMessage ? "text-purple-200/90" : "text-zinc-400"
+                                    }`}
+                            >
+                                <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    className={`w-3 h-3 ${isMyMessage ? "text-purple-200/90" : "text-zinc-400"}`}
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                    stroke="currentColor"
+                                    strokeWidth={2}
+                                >
+                                    <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"
+                                        className="rotate-180 origin-center"
+                                    />
+                                </svg>
+                                <span>Forwarded</span>
+                            </div>
+                        )}
+
+                        {/* Quoted Replying Header */}
+                        {message.replyTo && (
+                            <div
+                                onClick={() => scrollToRepliedMessage(message.replyTo._id)}
+                                className={`mb-2 p-2 rounded-xl text-xs border-l-4 cursor-pointer transition-all ${isMyMessage
+                                        ? "bg-black/25 border-white/90 hover:bg-black/35 text-white/95"
+                                        : "bg-black/30 border-purple-500 hover:bg-black/45 text-zinc-300"
+                                    }`}
+                            >
+                                <div className="font-semibold text-[11px] text-purple-300 mb-0.5 truncate flex items-center gap-1">
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        className="w-3 h-3 text-purple-400"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                    >
+                                        <path
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                            strokeWidth={2}
+                                            d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"
+                                        />
+                                    </svg>
+                                    <span>{message.replyTo.sender?.name || "Replying to"}</span>
+                                </div>
+                                <div className="truncate text-[11px] opacity-80">
+                                    {message.replyTo.messageType === "image" && "📷 Photo"}
+                                    {message.replyTo.messageType === "audio" && "🎤 Voice note"}
+                                    {message.replyTo.messageType === "file" &&
+                                        `📄 ${message.replyTo.fileName || "Document"}`}
+                                    {(!message.replyTo.messageType ||
+                                        message.replyTo.messageType === "text") &&
+                                        (message.replyTo.text || "Message")}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Voice Note Audio Attachment */}
+                        {isAudio && message.fileUrl && (
+                            <div className="mb-1">
+                                <AudioPlayer
+                                    audioUrl={message.fileUrl}
+                                    duration={message.duration}
+                                    isMyMessage={isMyMessage}
+                                />
+                            </div>
+                        )}
+
+                        {/* Image Attachment */}
+                        {isImage && message.fileUrl && (
+                            <div className="mb-2 rounded-xl overflow-hidden cursor-pointer group/img relative">
+                                <img
+                                    src={message.fileUrl}
+                                    alt={message.fileName || "Shared image"}
+                                    onClick={() => setShowImagePreview(true)}
+                                    className="w-full max-h-80 object-cover rounded-xl transition-transform duration-200 group-hover/img:scale-[1.01]"
+                                    loading="lazy"
+                                />
+                                <div className="absolute inset-0 bg-black/0 group-hover/img:bg-black/10 transition-colors flex items-center justify-center opacity-0 group-hover/img:opacity-100">
+                                    <span className="px-2.5 py-1 rounded-full bg-black/60 text-white text-[11px] font-medium backdrop-blur-md">
+                                        Click to view
+                                    </span>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Document / File Attachment */}
+                        {isFile && message.fileUrl && (
+                            <a
+                                href={message.fileUrl}
+                                download={message.fileName || "attachment"}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-3 p-2.5 mb-2 rounded-xl bg-black/25 hover:bg-black/40 border border-white/10 transition-all group/doc"
+                            >
+                                <div className="w-10 h-10 rounded-lg bg-purple-500/20 text-purple-300 flex items-center justify-center shrink-0 group-hover/doc:scale-105 transition-transform">
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        className="w-5 h-5"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                    >
+                                        <path
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                            strokeWidth={2}
+                                            d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                                        />
+                                    </svg>
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <p className="text-xs font-semibold text-white truncate group-hover/doc:underline">
+                                        {message.fileName || "Download Document"}
+                                    </p>
+                                    <p className="text-[10px] text-zinc-400 mt-0.5 font-mono">
+                                        {formatBytes(message.fileSize) || "File"}
+                                    </p>
+                                </div>
+                                <div className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center text-zinc-300 group-hover/doc:text-white shrink-0">
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        className="w-4 h-4"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                    >
+                                        <path
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                            strokeWidth={2}
+                                            d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                                        />
+                                    </svg>
+                                </div>
+                            </a>
+                        )}
+
+                        {/* Message Body / Caption */}
+                        {message.text && (
+                            <p className="whitespace-pre-wrap break-words leading-relaxed text-[13px] md:text-sm">
+                                {renderHighlightedText(message.text, searchHighlight)}
+                            </p>
+                        )}
+
+                        {/* Message Footer: Timestamp & Status & Star */}
+                        <div
+                            className={`flex items-center justify-end gap-1.5 mt-1 select-none text-[10px] ${isMyMessage ? "text-purple-200" : "text-zinc-400"
+                                }`}
+                        >
+                            {/* Pinned Indicator Badge */}
+                            {isPinned && (
+                                <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    className="w-3 h-3 text-purple-400 fill-purple-400 shrink-0"
+                                    viewBox="0 0 24 24"
+                                    title="Pinned message"
+                                >
+                                    <path d="M16 12V4h1V2H7v2h1v8l-2 3v2h5.2v5l.8.8.8-.8v-5H18v-2l-2-3z" />
+                                </svg>
+                            )}
+
+                            {/* Starred Indicator Badge */}
+                            {isStarredByMe && (
+                                <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    className="w-3 h-3 text-amber-400 fill-amber-400 shrink-0"
+                                    viewBox="0 0 24 24"
+                                    stroke="currentColor"
+                                    title="Starred message"
+                                >
+                                    <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        strokeWidth={1}
+                                        d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"
+                                    />
+                                </svg>
+                            )}
+                            <span>{formatTime(message.createdAt)}</span>
+
+                            {/* Status Ticks for Sent Messages */}
+                            {isMyMessage && (
+                                <span
+                                    className={`font-mono text-xs tracking-tighter ${message.isSeen
+                                            ? "text-sky-300 font-bold"
+                                            : "text-purple-200/80"
+                                        }`}
+                                    title={
+                                        message.isSeen
+                                            ? "Read"
+                                            : message.isDelivered
+                                                ? "Delivered"
+                                                : "Sent"
+                                    }
+                                >
+                                    {message.isSeen
+                                        ? "✓✓"
+                                        : message.isDelivered
+                                            ? "✓✓"
+                                            : "✓"}
+                                </span>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Side Emoji Button on Hover (Desktop) - click opens ONLY quick reactions */}
+                    {!isSelectionMode && (
+                        <button
+                            type="button"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                setShowReactions((prev) => !prev);
+                                setShowMenu(false);
+                            }}
+                            className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-[#181830]/90 hover:bg-[#252545] border border-white/15 text-zinc-300 hover:text-white flex items-center justify-center cursor-pointer transition-all duration-150 transform active:scale-95 shadow-lg shrink-0 self-center opacity-0 group-hover:opacity-100 ${
+                                showReactions
+                                    ? "opacity-100 ring-2 ring-purple-500/50 bg-purple-900/40 text-white"
+                                    : ""
+                            }`}
+                            title="React"
+                        >
                             <svg
                                 xmlns="http://www.w3.org/2000/svg"
-                                className="w-3 h-3 text-amber-400 fill-amber-400 shrink-0"
+                                className="w-4 h-4"
+                                fill="none"
                                 viewBox="0 0 24 24"
                                 stroke="currentColor"
-                                title="Starred message"
+                                strokeWidth={1.75}
                             >
                                 <path
                                     strokeLinecap="round"
                                     strokeLinejoin="round"
-                                    strokeWidth={1}
-                                    d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"
+                                    d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
                                 />
                             </svg>
-                        )}
-                        <span>{formatTime(message.createdAt)}</span>
+                        </button>
+                    )}
 
-                        {/* Status Ticks for Sent Messages */}
-                        {isMyMessage && (
-                            <span
-                                className={`font-mono text-xs tracking-tighter ${
-                                    message.isSeen
-                                        ? "text-sky-300 font-bold"
-                                        : "text-purple-200/80"
-                                }`}
-                                title={
-                                    message.isSeen
-                                        ? "Read"
-                                        : message.isDelivered
-                                        ? "Delivered"
-                                        : "Sent"
-                                }
+                    {/* Context Menu for Message Actions (Right-Click) */}
+                    {showMenu && (
+                        <div
+                            ref={menuRef}
+                            className={`absolute bottom-full mb-2 z-40 w-44 rounded-xl bg-[#1a1a32] border border-white/10 shadow-2xl py-1 text-xs text-zinc-200 animate-in fade-in duration-100 ${
+                                isMyMessage ? "right-2" : "left-2"
+                            }`}
+                        >
+                            {/* Reply */}
+                            <button
+                                type="button"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    setShowMenu(false);
+                                    onReply && onReply(message);
+                                }}
+                                className="w-full text-left px-3 py-2 hover:bg-white/10 flex items-center gap-2.5 text-zinc-300 hover:text-white transition-colors cursor-pointer"
                             >
-                                {message.isSeen
-                                    ? "✓✓"
-                                    : message.isDelivered
-                                    ? "✓✓"
-                                    : "✓"}
-                            </span>
-                        )}
-                    </div>
+                                <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    className="w-3.5 h-3.5 text-zinc-400"
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                    stroke="currentColor"
+                                    strokeWidth={2}
+                                >
+                                    <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"
+                                    />
+                                </svg>
+                                Reply
+                            </button>
+
+                            {/* Forward */}
+                            <button
+                                type="button"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    setShowMenu(false);
+                                    onForward && onForward(message);
+                                }}
+                                className="w-full text-left px-3 py-2 hover:bg-white/10 flex items-center gap-2.5 text-zinc-300 hover:text-white transition-colors cursor-pointer"
+                            >
+                                <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    className="w-3.5 h-3.5 text-zinc-400"
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                    stroke="currentColor"
+                                    strokeWidth={2}
+                                >
+                                    <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"
+                                        className="rotate-180 origin-center"
+                                    />
+                                </svg>
+                                Forward
+                            </button>
+
+                            {/* Copy (if text) */}
+                            {message.text && (
+                                <button
+                                    type="button"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        setShowMenu(false);
+                                        handleCopy();
+                                    }}
+                                    className="w-full text-left px-3 py-2 hover:bg-white/10 flex items-center gap-2.5 text-zinc-300 hover:text-white transition-colors cursor-pointer"
+                                >
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        className="w-3.5 h-3.5 text-zinc-400"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                        strokeWidth={2}
+                                    >
+                                        <path
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                            d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                                        />
+                                    </svg>
+                                    Copy
+                                </button>
+                            )}
+
+                            {/* Star / Unstar */}
+                            <button
+                                type="button"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    setShowMenu(false);
+                                    onToggleStar && onToggleStar(message._id);
+                                }}
+                                className="w-full text-left px-3 py-2 hover:bg-white/10 flex items-center gap-2.5 text-zinc-300 hover:text-white transition-colors cursor-pointer"
+                            >
+                                <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    className={`w-3.5 h-3.5 ${isStarredByMe ? "text-amber-400 fill-amber-400" : "text-zinc-400"}`}
+                                    fill={isStarredByMe ? "currentColor" : "none"}
+                                    viewBox="0 0 24 24"
+                                    stroke="currentColor"
+                                    strokeWidth={2}
+                                >
+                                    <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"
+                                    />
+                                </svg>
+                                {isStarredByMe ? "Unstar" : "Star"}
+                            </button>
+
+                            {/* Pin / Unpin */}
+                            <button
+                                type="button"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    setShowMenu(false);
+                                    onTogglePin && onTogglePin(message._id);
+                                }}
+                                className="w-full text-left px-3 py-2 hover:bg-white/10 flex items-center gap-2.5 text-zinc-300 hover:text-white transition-colors cursor-pointer"
+                            >
+                                <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    className={`w-3.5 h-3.5 ${isPinned ? "text-purple-400" : "text-zinc-400"}`}
+                                    fill={isPinned ? "currentColor" : "none"}
+                                    viewBox="0 0 24 24"
+                                    stroke="currentColor"
+                                    strokeWidth={2}
+                                >
+                                    <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        d="M16 12V4h1V2H7v2h1v8l-2 3v2h5.2v5l.8.8.8-.8v-5H18v-2l-2-3z"
+                                    />
+                                </svg>
+                                {isPinned ? "Unpin" : "Pin"}
+                            </button>
+
+                            <div className="h-px bg-white/10 my-1" />
+
+                            {/* Delete */}
+                            <button
+                                type="button"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    setShowMenu(false);
+                                    onDelete && onDelete(message._id, "forMe");
+                                }}
+                                className="w-full text-left px-3 py-2 hover:bg-white/10 flex items-center gap-2.5 text-zinc-300 hover:text-white transition-colors cursor-pointer"
+                            >
+                                <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    className="w-3.5 h-3.5 text-zinc-400"
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                    stroke="currentColor"
+                                    strokeWidth={2}
+                                >
+                                    <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                                    />
+                                </svg>
+                                Delete for me
+                            </button>
+                            {isMyMessage && (
+                                <button
+                                    type="button"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        setShowMenu(false);
+                                        onDelete && onDelete(message._id, "forEveryone");
+                                    }}
+                                    className="w-full text-left px-3 py-2 hover:bg-red-500/15 flex items-center gap-2.5 text-red-400 hover:text-red-300 transition-colors cursor-pointer"
+                                >
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        className="w-3.5 h-3.5 text-red-400"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                        strokeWidth={2}
+                                    >
+                                        <path
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                                        />
+                                    </svg>
+                                    Delete for everyone
+                                </button>
+                            )}
+                        </div>
+                    )}
                 </div>
 
                 {/* Reaction Badges Display */}
                 {Object.keys(reactionGroups).length > 0 && (
                     <div
-                        className={`flex flex-wrap gap-1 mt-1 z-10 ${
-                            isMyMessage ? "justify-end" : "justify-start"
-                        }`}
+                        className={`flex flex-wrap gap-1 mt-1 z-10 ${isMyMessage ? "justify-end" : "justify-start"
+                            } ${isGroup && !isMyMessage ? "ml-9" : ""}`}
                     >
                         {Object.entries(reactionGroups).map(([emoji, data]) => (
                             <button
@@ -666,11 +1094,10 @@ export const MessageBubble = ({
                                         ? data.users.join(", ")
                                         : undefined
                                 }
-                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium cursor-pointer transition-all duration-150 hover:scale-105 select-none ${
-                                    data.reactedByMe
+                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium cursor-pointer transition-all duration-150 hover:scale-105 select-none ${data.reactedByMe
                                         ? "bg-purple-600/35 border border-purple-400/50 text-purple-200 shadow-sm shadow-purple-900/40"
                                         : "bg-[#181830] border border-white/10 text-zinc-300 hover:border-white/25 hover:text-white"
-                                }`}
+                                    }`}
                             >
                                 <span className="text-[12px]">{emoji}</span>
                                 {data.count > 1 && (

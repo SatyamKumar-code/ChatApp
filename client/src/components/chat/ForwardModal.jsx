@@ -2,13 +2,21 @@ import React, { useContext, useState } from "react";
 import { ChatContext } from "../../context/ChatContext";
 import Avatar from "../common/Avatar";
 
-export const ForwardModal = ({ isOpen, message, onClose }) => {
+export const ForwardModal = ({ isOpen, message, messages: multiMessages, onClose }) => {
     const { conversations, forwardMessage } = useContext(ChatContext);
     const [selectedIds, setSelectedIds] = useState([]);
     const [searchQuery, setSearchQuery] = useState("");
     const [isSending, setIsSending] = useState(false);
 
-    if (!isOpen || !message) return null;
+    const msgsList = Array.isArray(message)
+        ? message
+        : Array.isArray(multiMessages)
+        ? multiMessages
+        : message
+        ? [message]
+        : [];
+
+    if (!isOpen || msgsList.length === 0) return null;
 
     const handleToggleSelect = (convId) => {
         setSelectedIds((prev) =>
@@ -22,7 +30,9 @@ export const ForwardModal = ({ isOpen, message, onClose }) => {
         if (selectedIds.length === 0 || isSending) return;
         try {
             setIsSending(true);
-            await forwardMessage(message, selectedIds);
+            for (const msg of msgsList) {
+                await forwardMessage(msg, selectedIds);
+            }
             setSelectedIds([]);
             onClose();
         } catch (err) {
@@ -45,10 +55,15 @@ export const ForwardModal = ({ isOpen, message, onClose }) => {
     });
 
     const getPreviewText = () => {
-        if (message.text) return message.text;
-        if (message.messageType === "audio") return "🎤 Voice message";
-        if (message.messageType === "image") return "📷 Photo";
-        if (message.messageType === "file") return `📄 ${message.fileName || "Document"}`;
+        if (msgsList.length > 1) {
+            return `${msgsList.length} messages selected`;
+        }
+        const single = msgsList[0];
+        if (!single) return "Message";
+        if (single.text) return single.text;
+        if (single.messageType === "audio") return "🎤 Voice message";
+        if (single.messageType === "image") return "📷 Photo";
+        if (single.messageType === "file") return `📄 ${single.fileName || "Document"}`;
         return "Message";
     };
 

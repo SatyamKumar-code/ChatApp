@@ -7,6 +7,7 @@ import {
   toggleStarMessage,
   getStarredMessages,
   forwardMessage,
+  clearConversationMessages,
 } from "../controllers/messageController.js";
 import protect from "../middleware/authMiddleware.js";
 
@@ -17,6 +18,9 @@ router.post("/", protect, sendMessage);
 
 // Forward message to multiple conversations
 router.post("/forward", protect, forwardMessage);
+
+// Clear conversation messages
+router.post("/clear/:conversationId", protect, clearConversationMessages);
 
 // Get starred messages (Must be before /:conversationId)
 router.get("/starred/all", protect, getStarredMessages);

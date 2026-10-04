@@ -1,4 +1,4 @@
-import React, { useContext, useState } from "react";
+import React, { useContext, useState, useEffect } from "react";
 import { AuthContext } from "../context/AuthContext";
 import { ChatContext } from "../context/ChatContext";
 
@@ -22,9 +22,12 @@ import IncomingCallModal from "../components/call/IncomingCallModal";
 import CallModal from "../components/call/CallModal";
 import PinnedMessageBanner from "../components/chat/PinnedMessageBanner";
 import ForwardModal from "../components/chat/ForwardModal";
+import ChatThemeModal, { CHAT_THEMES } from "../components/chat/ChatThemeModal";
+import { useTheme } from "../context/ThemeContext";
 
 export const ChatHome = () => {
     const { user } = useContext(AuthContext);
+    const { isLight } = useTheme();
     const {
         conversations,
         selectedConversation,
@@ -36,6 +39,12 @@ export const ChatHome = () => {
         stopTyping,
         typingUsers,
         togglePinMessage,
+        clearChat,
+        deleteConversation,
+        leaveOrRemoveGroupMember,
+        toggleBlockUser,
+        isUserBlocked,
+        blockedUsers,
     } = useContext(ChatContext);
 
     // Active Navigation Tab: 'chats' | 'contacts'
@@ -49,7 +58,150 @@ export const ChatHome = () => {
     const [isSending, setIsSending] = useState(false);
     const [isStarredOpen, setIsStarredOpen] = useState(false);
     const [isVerifyEncryptionOpen, setIsVerifyEncryptionOpen] = useState(false);
+    const [isThemeModalOpen, setIsThemeModalOpen] = useState(false);
     const [forwardingMessage, setForwardingMessage] = useState(null);
+
+    // Chat Theme State
+    const [currentThemeId, setCurrentThemeId] = useState(() => {
+        return localStorage.getItem("chatapp_global_theme") || "default";
+    });
+
+    const activeTheme = React.useMemo(() => {
+        const found = CHAT_THEMES.find((t) => t.id === currentThemeId) || CHAT_THEMES[0];
+        if (isLight && found.id === "default") {
+            return {
+                ...found,
+                style: { background: "var(--bg-chat, #b0b9c4)" },
+            };
+        }
+        return found;
+    }, [currentThemeId, isLight]);
+
+    const handleSelectTheme = (themeId) => {
+        setCurrentThemeId(themeId);
+        localStorage.setItem("chatapp_global_theme", themeId);
+    };
+
+    // Custom Wallpaper Image State
+    const [customWallpaper, setCustomWallpaper] = useState(() => {
+        return localStorage.getItem("chatapp_custom_wallpaper") || "";
+    });
+
+    const [wallpaperOpacity, setWallpaperOpacity] = useState(() => {
+        const saved = localStorage.getItem("chatapp_wallpaper_opacity");
+        return saved !== null ? Number(saved) : 0.45;
+    });
+
+    const handleSetCustomWallpaper = (val) => {
+        setCustomWallpaper(val);
+        if (val) {
+            localStorage.setItem("chatapp_custom_wallpaper", val);
+        } else {
+            localStorage.removeItem("chatapp_custom_wallpaper");
+        }
+    };
+
+    const handleSetWallpaperOpacity = (val) => {
+        setWallpaperOpacity(val);
+        localStorage.setItem("chatapp_wallpaper_opacity", String(val));
+    };
+
+    // Muted Chats State
+    const [mutedChats, setMutedChats] = useState(() => {
+        try {
+            return JSON.parse(localStorage.getItem("chatapp_muted_chats") || "[]");
+        } catch {
+            return [];
+        }
+    });
+
+    const isCurrentChatMuted = Boolean(
+        selectedConversation?._id && mutedChats.includes(selectedConversation._id)
+    );
+
+    const handleToggleMuteCurrentChat = () => {
+        if (!selectedConversation?._id) return;
+        const convId = selectedConversation._id;
+        const nextMuted = isCurrentChatMuted
+            ? mutedChats.filter((id) => id !== convId)
+            : [...mutedChats, convId];
+        setMutedChats(nextMuted);
+        localStorage.setItem("chatapp_muted_chats", JSON.stringify(nextMuted));
+    };
+
+    // Blocked status
+    const partnerId = selectedConversation?.user?._id?.toString();
+    const isCurrentContactBlocked = Boolean(partnerId && isUserBlocked(partnerId));
+
+    const handleDeleteCurrentGroupChat = async () => {
+        if (!selectedConversation?._id) return;
+        const confirmDelete = window.confirm("Are you sure you want to delete this group chat history?");
+        if (!confirmDelete) return;
+        try {
+            await deleteConversation(selectedConversation._id);
+        } catch (err) {
+            console.error("Failed to delete group chat:", err);
+            alert("Failed to delete group chat");
+        }
+    };
+
+    const handleBlockOrLeaveCurrentChat = async () => {
+        if (!selectedConversation) return;
+
+        if (selectedConversation.isGroup) {
+            if (selectedConversation.isLeft || selectedConversation.user?.isLeft) {
+                return handleDeleteCurrentGroupChat();
+            }
+            const confirmLeave = window.confirm("Are you sure you want to leave this group?");
+            if (!confirmLeave) return;
+            try {
+                await leaveOrRemoveGroupMember(selectedConversation._id, user._id);
+            } catch (err) {
+                console.error("Failed to leave group:", err);
+                alert(err.response?.data?.message || "Failed to leave group");
+            }
+            return;
+        }
+
+        if (!partnerId) return;
+        if (isCurrentContactBlocked) {
+            try {
+                await toggleBlockUser(partnerId);
+                alert(`${selectedConversation.user?.name || "Contact"} has been unblocked.`);
+            } catch (err) {
+                console.error("Failed to unblock:", err);
+                alert(err.response?.data?.message || "Failed to unblock contact");
+            }
+        } else {
+            const confirmBlock = window.confirm(
+                `Are you sure you want to block ${selectedConversation.user?.name || "this contact"}?`
+            );
+            if (!confirmBlock) return;
+            try {
+                await toggleBlockUser(partnerId);
+                alert(`${selectedConversation.user?.name || "Contact"} has been blocked.`);
+            } catch (err) {
+                console.error("Failed to block:", err);
+                alert(err.response?.data?.message || "Failed to block contact");
+            }
+        }
+    };
+
+    // Clear Chat Handler
+    const handleClearCurrentChat = async () => {
+        if (!selectedConversation?._id) return;
+        const confirmClear = window.confirm(
+            "Are you sure you want to clear all messages in this conversation?"
+        );
+        if (!confirmClear) return;
+
+        try {
+            await clearChat(selectedConversation._id);
+        } catch (err) {
+            console.error("Failed to clear chat:", err);
+            alert("Failed to clear chat messages");
+        }
+    };
 
     // In-Chat Search state
     const [isSearching, setIsSearching] = useState(false);
@@ -164,7 +316,7 @@ export const ChatHome = () => {
     };
 
     return (
-        <div className="flex h-screen w-screen overflow-hidden bg-[#0a0a14] text-zinc-100 font-sans antialiased">
+        <div className="flex h-screen w-screen overflow-hidden bg-[var(--bg-app)] text-[var(--text-primary)] font-sans antialiased transition-colors duration-200">
             {/* 1. Left Icon Navigation Rail */}
             <NavigationRail
                 activeTab={activeTab}
@@ -200,11 +352,23 @@ export const ChatHome = () => {
 
             {/* 3. Main Chat View */}
             <div
-                className={`flex-1 flex flex-col h-full min-w-0 bg-[#0c0c1a] relative ${!selectedConversation ? "hidden md:flex" : "flex"
+                className={`flex-1 flex flex-col h-full min-w-0 transition-colors duration-300 relative overflow-hidden ${!selectedConversation ? "hidden md:flex" : "flex"
                     }`}
+                style={activeTheme.style}
             >
+                {/* Custom Wallpaper Image Overlay */}
+                {customWallpaper && (
+                    <div
+                        className="absolute inset-0 bg-cover bg-center pointer-events-none z-0 transition-opacity duration-300"
+                        style={{
+                            backgroundImage: `url(${customWallpaper})`,
+                            opacity: wallpaperOpacity,
+                        }}
+                    />
+                )}
+
                 {selectedConversation ? (
-                    <>
+                    <div className="flex-1 flex flex-col h-full min-w-0 relative z-1">
                         {/* Header */}
                         <ChatHeader
                             partner={selectedConversation.user}
@@ -223,6 +387,13 @@ export const ChatHome = () => {
                             onNextMatch={handleNextMatch}
                             onPrevMatch={handlePrevMatch}
                             onOpenStarred={() => setIsStarredOpen(true)}
+                            onOpenChatTheme={() => setIsThemeModalOpen(true)}
+                            isMuted={isCurrentChatMuted}
+                            onToggleMute={handleToggleMuteCurrentChat}
+                            onClearChat={handleClearCurrentChat}
+                            onBlockContact={handleBlockOrLeaveCurrentChat}
+                            isBlocked={isCurrentContactBlocked}
+                            onForwardSelected={(selectedMsgs) => setForwardingMessage(selectedMsgs)}
                         />
 
                         {/* Pinned Message Banner */}
@@ -251,9 +422,72 @@ export const ChatHome = () => {
                             onForward={(msg) => setForwardingMessage(msg)}
                         />
 
-                        {/* Message Input Box */}
+                        {/* Blocked Contact Info Bar (Notice only, user can still message) */}
+                        {isCurrentContactBlocked && (
+                            <div className="px-4 py-2 bg-rose-500/10 border-t border-rose-500/20 backdrop-blur-xs flex items-center justify-between gap-3 text-xs text-rose-300 animate-in fade-in duration-150">
+                                <div className="flex items-center gap-2 min-w-0">
+                                    <span className="text-sm">🚫</span>
+                                    <span className="truncate">
+                                        You have blocked this contact. You will not receive any new messages from them.
+                                    </span>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={handleBlockOrLeaveCurrentChat}
+                                    className="px-2.5 py-1 rounded-lg bg-rose-600/30 hover:bg-rose-600 border border-rose-500/40 text-rose-200 hover:text-white font-medium text-[11px] transition-all cursor-pointer shrink-0"
+                                >
+                                    Unblock
+                                </button>
+                            </div>
+                        )}
+
+                        {/* Notice for user who is blocked by other */}
+                        {!isCurrentContactBlocked && selectedConversation.user?.isBlockedByOther && (
+                            <div className="px-4 py-2 bg-zinc-900/90 border-t border-white/10 backdrop-blur-xs flex items-center gap-2 text-xs text-zinc-400 animate-in fade-in duration-150">
+                                <span className="text-sm">🚫</span>
+                                <span className="truncate">
+                                    You have been blocked by this user.
+                                </span>
+                            </div>
+                        )}
+
+                        {/* Message Input Box or Left Group Read-Only Notice */}
                         {(() => {
                             const isGroupChat = Boolean(selectedConversation?.isGroup);
+                            const isLeftGroup = isGroupChat && Boolean(selectedConversation?.isLeft || selectedConversation?.user?.isLeft);
+
+                            if (isLeftGroup) {
+                                return (
+                                    <div className="p-4 bg-[#121224]/70 border-t border-white/10 backdrop-blur-md flex flex-col sm:flex-row items-center justify-between gap-3 text-xs animate-in fade-in duration-150">
+                                        <div className="flex items-center gap-2 text-zinc-300">
+                                            <span className="text-base">🚫</span>
+                                            <span>You can't send messages to this group because you're no longer a participant.</span>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={handleDeleteCurrentGroupChat}
+                                            className="px-4 py-2 rounded-xl bg-rose-600/20 hover:bg-rose-600 text-rose-300 hover:text-white border border-rose-500/30 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-md shrink-0"
+                                        >
+                                            <svg
+                                                xmlns="http://www.w3.org/2000/svg"
+                                                className="w-3.5 h-3.5"
+                                                fill="none"
+                                                viewBox="0 0 24 24"
+                                                stroke="currentColor"
+                                            >
+                                                <path
+                                                    strokeLinecap="round"
+                                                    strokeLinejoin="round"
+                                                    strokeWidth={2}
+                                                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                                                />
+                                            </svg>
+                                            <span>Delete Group</span>
+                                        </button>
+                                    </div>
+                                );
+                            }
+
                             const groupAdminId =
                                 selectedConversation?.groupAdmin?._id ||
                                 selectedConversation?.groupAdmin;
@@ -279,7 +513,7 @@ export const ChatHome = () => {
                                 />
                             );
                         })()}
-                    </>
+                    </div>
                 ) : (
                     <EmptyChat
                         onOpenGroups={() => setActiveTab("groups")}
@@ -347,6 +581,18 @@ export const ChatHome = () => {
                 isOpen={Boolean(forwardingMessage)}
                 message={forwardingMessage}
                 onClose={() => setForwardingMessage(null)}
+            />
+
+            {/* 12. Chat Theme / Wallpaper Modal */}
+            <ChatThemeModal
+                isOpen={isThemeModalOpen}
+                onClose={() => setIsThemeModalOpen(false)}
+                currentThemeId={currentThemeId}
+                onSelectTheme={handleSelectTheme}
+                customWallpaper={customWallpaper}
+                onSetCustomWallpaper={handleSetCustomWallpaper}
+                wallpaperOpacity={wallpaperOpacity}
+                onSetWallpaperOpacity={handleSetWallpaperOpacity}
             />
 
             {/* 12. Mobile Bottom Navigation Bar (Visible only on mobile when list is active) */}

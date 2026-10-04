@@ -401,13 +401,34 @@ const searchUsers = async (req, res) => {
             _id: { $ne: req.user._id },
             $or: orConditions,
         })
-            .select("name phone profilePicture about isOnline lastSeen")
+            .select("name phone profilePicture about isOnline lastSeen blockedUsers")
             .limit(20);
+
+        const currentUserId = req.user._id.toString();
+        const formattedUsers = users.map((u) => {
+            const isBlockedByOther = Boolean(
+                u.blockedUsers &&
+                u.blockedUsers.some(
+                    (bId) => (bId?._id || bId).toString() === currentUserId
+                )
+            );
+
+            return {
+                _id: u._id,
+                name: u.name,
+                phone: u.phone,
+                profilePicture: isBlockedByOther ? "" : (u.profilePicture || ""),
+                about: isBlockedByOther ? "" : (u.about || ""),
+                isOnline: isBlockedByOther ? false : Boolean(u.isOnline),
+                lastSeen: isBlockedByOther ? null : u.lastSeen,
+                isBlockedByOther,
+            };
+        });
 
         return res.status(200).json({
             success: true,
             error: false,
-            users,
+            users: formattedUsers,
         });
     } catch (error) {
         console.error("Search users error:", error.message);
@@ -419,4 +440,89 @@ const searchUsers = async (req, res) => {
     }
 };
 
-export { registerUser, loginUser, refreshAccessToken, logoutUser, updateProfile, searchUsers };
+// Toggle Block User
+const toggleBlockUser = async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const currentUserId = req.user._id;
+
+        if (userId.toString() === currentUserId.toString()) {
+            return res.status(400).json({
+                success: false,
+                message: "You cannot block yourself",
+            });
+        }
+
+        const user = await UserModel.findById(currentUserId);
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found",
+            });
+        }
+
+        if (!user.blockedUsers) {
+            user.blockedUsers = [];
+        }
+
+        const index = user.blockedUsers.findIndex(
+            (id) => (id?._id || id).toString() === userId.toString()
+        );
+
+        let isBlocked = false;
+        if (index > -1) {
+            user.blockedUsers.splice(index, 1);
+            isBlocked = false;
+        } else {
+            user.blockedUsers.push(userId);
+            isBlocked = true;
+        }
+
+        await user.save();
+
+        res.status(200).json({
+            success: true,
+            isBlocked,
+            blockedUsers: user.blockedUsers,
+            message: isBlocked ? "User blocked successfully" : "User unblocked successfully",
+        });
+    } catch (error) {
+        console.error("Toggle block user error:", error);
+        res.status(500).json({
+            success: false,
+            message: "Failed to update block status",
+        });
+    }
+};
+
+// Get Blocked Users
+const getBlockedUsers = async (req, res) => {
+    try {
+        const user = await UserModel.findById(req.user._id).populate(
+            "blockedUsers",
+            "name phone profilePicture isOnline lastSeen"
+        );
+
+        res.status(200).json({
+            success: true,
+            blockedUsers: user?.blockedUsers || [],
+        });
+    } catch (error) {
+        console.error("Get blocked users error:", error);
+        res.status(500).json({
+            success: false,
+            message: "Failed to get blocked users",
+        });
+    }
+};
+
+export {
+    registerUser,
+    loginUser,
+    refreshAccessToken,
+    logoutUser,
+    updateProfile,
+    searchUsers,
+    toggleBlockUser,
+    getBlockedUsers,
+};

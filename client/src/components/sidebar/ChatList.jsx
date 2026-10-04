@@ -1,6 +1,7 @@
 import React, { useContext, useEffect, useState } from "react";
 import { AuthContext } from "../../context/AuthContext";
 import { ChatContext } from "../../context/ChatContext";
+import { useTheme, THEME_MODES } from "../../context/ThemeContext";
 import Avatar from "../common/Avatar";
 import InviteModal from "../common/InviteModal";
 
@@ -13,6 +14,7 @@ export const ChatList = ({
     unreadTotal = 0,
 }) => {
     const { user } = useContext(AuthContext);
+    const { themeMode, changeThemeMode, resolvedTheme } = useTheme();
     const {
         conversations,
         loading,
@@ -218,7 +220,29 @@ export const ChatList = ({
                     </div>
 
                     <div className="flex items-center gap-1.5">
-                        {onOpenCreateGroup && (
+                        {/* Mobile Theme Toggle Button */}
+                        <button
+                            type="button"
+                            onClick={() => {
+                                if (themeMode === THEME_MODES.SYSTEM) changeThemeMode(THEME_MODES.DARK);
+                                else if (themeMode === THEME_MODES.DARK) changeThemeMode(THEME_MODES.LIGHT);
+                                else changeThemeMode(THEME_MODES.SYSTEM);
+                            }}
+                            className="md:hidden w-8 h-8 rounded-xl bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-amber-400 flex items-center justify-center transition-colors cursor-pointer"
+                            title={`Theme: ${themeMode} (${resolvedTheme})`}
+                        >
+                            {resolvedTheme === "light" ? (
+                                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+                                </svg>
+                            ) : (
+                                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+                                </svg>
+                            )}
+                        </button>
+
+                        {isGroupsView && onOpenCreateGroup && (
                             <button
                                 type="button"
                                 onClick={onOpenCreateGroup}
@@ -443,8 +467,12 @@ export const ChatList = ({
                                                     {partner.name}
                                                 </h3>
                                                 {conv.isGroup && (
-                                                    <span className="px-1.5 py-0.2 rounded bg-purple-500/20 text-purple-300 text-[10px] font-medium border border-purple-500/30 shrink-0">
-                                                        Group
+                                                    <span className={`px-1.5 py-0.2 rounded text-[10px] font-medium border shrink-0 ${
+                                                        conv.isLeft || conv.user?.isLeft
+                                                            ? "bg-rose-500/15 text-rose-300 border-rose-500/25"
+                                                            : "bg-purple-500/20 text-purple-300 border-purple-500/30"
+                                                    }`}>
+                                                        {conv.isLeft || conv.user?.isLeft ? "Left" : "Group"}
                                                     </span>
                                                 )}
                                             </div>
@@ -508,6 +536,10 @@ export const ChatList = ({
                                                     <span>
                                                         {lastMsg?.isDeleted || lastMsg?.deletedForEveryone
                                                             ? "🚫 This message was deleted"
+                                                            : lastMsg?.messageType === "system"
+                                                            ? lastMsg.text
+                                                            : lastMsg?.messageType === "call"
+                                                            ? `${lastMsg.callDetails?.callType === "video" || lastMsg.text?.includes("Video") || lastMsg.text?.includes("video") ? "📹" : "📞"} ${lastMsg.text || "Call"}`
                                                             : lastMsg?.text
                                                             ? lastMsg.text.startsWith("enc:v1:")
                                                                 ? "🔒 Encrypted Message"

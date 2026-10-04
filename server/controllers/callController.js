@@ -10,18 +10,36 @@ export const getMyCalls = async (req, res) => {
         const userId = req.user._id;
 
         const calls = await Call.find({
-            $or: [{ caller: userId }, { receiver: userId }],
+            $or: [
+                { caller: userId },
+                { receiver: userId },
+                { groupParticipants: userId },
+            ],
             deletedFor: { $ne: userId },
         })
             .populate("caller", "name phone profilePicture isOnline")
             .populate("receiver", "name phone profilePicture isOnline")
+            .populate("groupParticipants", "name phone profilePicture isOnline")
+            .populate("conversation", "groupName groupAvatar isGroup")
             .sort({ createdAt: -1 })
             .limit(100);
 
         // Format calls for client presentation
         const formattedCalls = calls.map((call) => {
             const isCaller = call.caller?._id?.toString() === userId.toString();
-            const contactUser = isCaller ? call.receiver : call.caller;
+            let contactUser;
+
+            if (call.isGroupCall) {
+                contactUser = {
+                    _id: call.conversation?._id || call._id,
+                    name: call.conversation?.groupName || "Group Call",
+                    profilePicture: call.conversation?.groupAvatar || "",
+                    phone: "",
+                    isGroup: true,
+                };
+            } else {
+                contactUser = isCaller ? call.receiver : call.caller;
+            }
 
             let directionStatus = call.status;
             if (call.status === "completed" || call.status === "rejected") {
@@ -35,6 +53,7 @@ export const getMyCalls = async (req, res) => {
                 _id: call._id.toString(),
                 user: contactUser || { name: "Unknown", phone: "", profilePicture: "" },
                 isCaller,
+                isGroupCall: Boolean(call.isGroupCall),
                 callType: call.callType || "video",
                 status: directionStatus,
                 originalStatus: call.status,
