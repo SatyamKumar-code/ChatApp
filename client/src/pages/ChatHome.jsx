@@ -316,7 +316,7 @@ export const ChatHome = () => {
     };
 
     return (
-        <div className="flex h-screen w-screen overflow-hidden bg-[var(--bg-app)] text-[var(--text-primary)] font-sans antialiased transition-colors duration-200">
+        <div className="flex h-full h-[100dvh] w-full w-screen overflow-hidden bg-[var(--bg-app)] text-[var(--text-primary)] font-sans antialiased transition-colors duration-200">
             {/* 1. Left Icon Navigation Rail */}
             <NavigationRail
                 activeTab={activeTab}
@@ -597,7 +597,7 @@ export const ChatHome = () => {
 
             {/* 12. Mobile Bottom Navigation Bar (Visible only on mobile when list is active) */}
             {!selectedConversation && (
-                <nav className="md:hidden fixed bottom-0 inset-x-0 bg-[#0c0c18]/95 backdrop-blur-lg border-t border-white/10 px-4 py-1.5 flex items-center justify-around z-30 shadow-2xl">
+                <nav className="md:hidden fixed bottom-0 inset-x-0 bg-[#0c0c18]/95 backdrop-blur-lg border-t border-white/10 px-4 pt-1.5 pb-[calc(0.375rem+env(safe-area-inset-bottom,0px))] flex items-center justify-around z-30 shadow-2xl">
                     {/* Chats Tab */}
                     <button
                         type="button"

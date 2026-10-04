@@ -85,7 +85,7 @@ export const CallHistoryList = ({ onOpenSettings }) => {
     return (
         <div className="flex-1 flex flex-col min-w-0 bg-[#0f0f1c] select-none h-full border-r border-white/5 relative">
             {/* Header */}
-            <div className="px-5 py-4 border-b border-white/5 flex items-center justify-between">
+            <div className="px-5 pt-[calc(1rem+env(safe-area-inset-top,0px))] pb-4 md:py-4 border-b border-white/5 flex items-center justify-between">
                 <div className="flex items-center gap-3">
                     {onOpenSettings && (
                         <div

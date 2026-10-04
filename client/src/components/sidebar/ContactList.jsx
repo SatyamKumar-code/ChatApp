@@ -131,7 +131,7 @@ export const ContactList = ({ onStartChat, onOpenSettings }) => {
     return (
         <div className="flex-1 flex flex-col min-w-0 bg-[#0f0f1c] select-none h-full border-r border-white/5">
             {/* Header */}
-            <div className="px-4 md:px-5 pt-4 md:pt-5 pb-3 border-b border-white/5 space-y-3">
+            <div className="px-4 md:px-5 pt-[calc(1rem+env(safe-area-inset-top,0px))] md:pt-5 pb-3 border-b border-white/5 space-y-3">
                 <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2.5">
                         {/* Mobile profile avatar quick click */}

@@ -315,7 +315,7 @@ export const MessageInput = ({ onSendMessage, onTyping, onStopTyping, disabled =
     }
 
     return (
-        <div className="p-3 md:p-4 relative">
+        <div className="p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] md:p-4 relative">
             {/* Replying Preview Banner */}
             {replyingTo && (
                 <div className="mb-2.5 flex items-center justify-between p-2.5 rounded-xl bg-[#181832] border border-purple-500/30 border-l-4 border-l-purple-500 shadow-sm animate-in fade-in slide-in-from-bottom-2 duration-150">

@@ -110,7 +110,7 @@ export const ChatHeader = ({
     };
 
     return (
-        <header className="h-16 px-4 md:px-6 bg-[#0f0f1c] border-b border-white/5 flex items-center justify-between shrink-0 select-none z-10 relative">
+        <header className="min-h-16 h-auto pt-[env(safe-area-inset-top,0px)] px-4 md:px-6 bg-[#0f0f1c] border-b border-white/5 flex items-center justify-between shrink-0 select-none z-10 relative">
             {isSelectionMode ? (
                 /* WhatsApp-Style Multi-Select Top Bar */
                 <div className="flex-1 flex items-center justify-between animate-in fade-in duration-150">
