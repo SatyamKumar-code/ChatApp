@@ -1,0 +1,14 @@
+{
+  "appId": "com.chatapp.messenger",
+  "appName": "ChatApp",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 1500,
+      "backgroundColor": "#0c0c18"
+    }
+  }
+}

@@ -4,6 +4,7 @@ import { useTheme, THEME_MODES } from "../../context/ThemeContext";
 import Modal from "../common/Modal";
 import ProfilePhotoUpload from "./ProfilePhotoUpload";
 import { playMessageSound } from "../../utils/callSounds";
+import { getDevicePlatform } from "../../utils/deviceDetect";
 
 export const SettingsModal = ({ isOpen, onClose }) => {
     const { user, updateProfile, logout } = useContext(AuthContext);
@@ -37,6 +38,20 @@ export const SettingsModal = ({ isOpen, onClose }) => {
     const [onlineVisible, setOnlineVisible] = useState(() => {
         return localStorage.getItem("chatapp_online_visible") !== "false";
     });
+
+    const [isDownloadingApk, setIsDownloadingApk] = useState(false);
+    const currentPlatform = getDevicePlatform();
+
+    const handleDownloadApk = () => {
+        setIsDownloadingApk(true);
+        const link = document.createElement("a");
+        link.href = "/downloads/ChatApp.apk";
+        link.download = "ChatApp.apk";
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(() => setIsDownloadingApk(false), 2000);
+    };
 
     // When modal opens or user changes, sync form
     React.useEffect(() => {
@@ -261,6 +276,37 @@ export const SettingsModal = ({ isOpen, onClose }) => {
                             />
                         </svg>
                         Account
+                    </button>
+
+                    {/* App Download Tab */}
+                    <button
+                        onClick={() => setActiveTab("downloadApp")}
+                        className={`flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium transition-all cursor-pointer ${
+                            activeTab === "downloadApp"
+                                ? "bg-purple-600/20 text-purple-300 font-semibold border border-purple-500/30"
+                                : "text-zinc-400 hover:text-white hover:bg-white/5"
+                        }`}
+                    >
+                        <div className="flex items-center gap-2.5">
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                className="w-4 h-4 shrink-0 text-emerald-400"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                            >
+                                <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={2}
+                                    d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                                />
+                            </svg>
+                            Download App
+                        </div>
+                        <span className="text-[10px] font-bold px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                            {currentPlatform === "android" ? "APK" : currentPlatform === "ios" ? "iOS" : "Mobile"}
+                        </span>
                     </button>
                 </div>
 
@@ -693,6 +739,148 @@ export const SettingsModal = ({ isOpen, onClose }) => {
                                     </svg>
                                     Log Out of ChatApp
                                 </button>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* ===== 6. DOWNLOAD APP TAB ===== */}
+                    {activeTab === "downloadApp" && (
+                        <div className="space-y-4">
+                            {/* Device & Offline Info Banner */}
+                            <div className="bg-gradient-to-r from-purple-900/40 via-indigo-900/30 to-purple-900/40 p-4 rounded-2xl border border-purple-500/20 relative overflow-hidden">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 rounded-xl overflow-hidden bg-slate-800 p-0.5 border border-purple-500/30 flex-shrink-0 shadow-md">
+                                        <img src="/pwa-512x512.png" alt="ChatApp" className="w-full h-full object-cover rounded-[10px]" />
+                                    </div>
+                                    <div>
+                                        <h4 className="text-sm font-semibold text-white flex items-center gap-2">
+                                            ChatApp Mobile & Offline
+                                            <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                                                Offline Ready
+                                            </span>
+                                        </h4>
+                                        <p className="text-xs text-slate-300 mt-0.5">
+                                            Install ChatApp on your device to enjoy instant messaging even when you have no internet connection.
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Android APK Download Section (Shown if Android or Desktop) */}
+                            {(currentPlatform === "android" || currentPlatform === "desktop") && (
+                                <div className={`p-4 rounded-xl border transition-all ${
+                                    currentPlatform === "android"
+                                        ? "bg-slate-900/90 border-emerald-500/40 shadow-lg shadow-emerald-950/20"
+                                        : "bg-[#181830] border-white/5"
+                                }`}>
+                                    <div className="flex items-start justify-between gap-3">
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-10 h-10 rounded-xl overflow-hidden bg-slate-800 p-0.5 border border-emerald-500/30 flex-shrink-0 shadow-md">
+                                                <img src="/pwa-512x512.png" alt="ChatApp" className="w-full h-full object-cover rounded-[10px]" />
+                                            </div>
+                                            <div>
+                                                <h5 className="text-sm font-semibold text-white flex items-center gap-2">
+                                                    Android App (APK)
+                                                    {currentPlatform === "android" && (
+                                                        <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-1.5 py-0.5 rounded">
+                                                            Your Device
+                                                        </span>
+                                                    )}
+                                                </h5>
+                                                <p className="text-xs text-zinc-400 mt-0.5">
+                                                    Installable Android APK with offline chat caching, push alerts and speed.
+                                                </p>
+                                            </div>
+                                        </div>
+
+                                        <button
+                                            type="button"
+                                            onClick={handleDownloadApk}
+                                            disabled={isDownloadingApk}
+                                            className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-semibold shadow-md shadow-emerald-900/30 active:scale-95 transition-all flex items-center gap-1.5 flex-shrink-0 cursor-pointer"
+                                        >
+                                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                            </svg>
+                                            {isDownloadingApk ? "Downloading..." : "Download APK"}
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* iOS Install Guide Section (Shown if iOS or Desktop) */}
+                            {(currentPlatform === "ios" || currentPlatform === "desktop") && (
+                                <div className={`p-4 rounded-xl border transition-all ${
+                                    currentPlatform === "ios"
+                                        ? "bg-slate-900/90 border-purple-500/40 shadow-lg shadow-purple-950/20"
+                                        : "bg-[#181830] border-white/5"
+                                }`}>
+                                    <div className="flex items-center gap-3 mb-3">
+                                        <div className="w-10 h-10 rounded-xl overflow-hidden bg-slate-800 p-0.5 border border-purple-500/30 flex-shrink-0 shadow-md">
+                                            <img src="/pwa-512x512.png" alt="ChatApp" className="w-full h-full object-cover rounded-[10px]" />
+                                        </div>
+                                        <div>
+                                            <h5 className="text-sm font-semibold text-white flex items-center gap-2">
+                                                iPhone & iPad (iOS)
+                                                {currentPlatform === "ios" && (
+                                                    <span className="text-[10px] bg-purple-500/20 text-purple-300 border border-purple-500/30 px-1.5 py-0.5 rounded">
+                                                        Your Device
+                                                    </span>
+                                                )}
+                                            </h5>
+                                            <p className="text-xs text-zinc-400 mt-0.5">
+                                                Install on iOS Home Screen with offline storage in 3 steps:
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    {/* Safari 3 Step Guide */}
+                                    <div className="space-y-2 text-xs text-zinc-300 pl-1">
+                                        <div className="flex items-center gap-2">
+                                            <span className="w-5 h-5 rounded-full bg-purple-600/30 text-purple-300 flex items-center justify-center font-bold text-[10px] flex-shrink-0">
+                                                1
+                                            </span>
+                                            <span>Open in <b>Safari</b> and tap the <b>Share button</b> (square with upward arrow)</span>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <span className="w-5 h-5 rounded-full bg-purple-600/30 text-purple-300 flex items-center justify-center font-bold text-[10px] flex-shrink-0">
+                                                2
+                                            </span>
+                                            <span>Scroll down and select <b>"Add to Home Screen"</b> (+)</span>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <span className="w-5 h-5 rounded-full bg-purple-600/30 text-purple-300 flex items-center justify-center font-bold text-[10px] flex-shrink-0">
+                                                3
+                                            </span>
+                                            <span>Tap <b>"Add"</b> at the top right to start using offline ChatApp!</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Offline Features Summary */}
+                            <div className="bg-[#181830] p-4 rounded-xl border border-white/5 space-y-2">
+                                <h5 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
+                                    Offline Capabilities
+                                </h5>
+                                <div className="grid grid-cols-2 gap-2 text-xs text-zinc-300">
+                                    <div className="flex items-center gap-2 p-2 rounded-lg bg-white/5">
+                                        <span className="text-emerald-400 font-bold">✓</span>
+                                        <span>Cached Chat History</span>
+                                    </div>
+                                    <div className="flex items-center gap-2 p-2 rounded-lg bg-white/5">
+                                        <span className="text-emerald-400 font-bold">✓</span>
+                                        <span>Offline Outbox Queue</span>
+                                    </div>
+                                    <div className="flex items-center gap-2 p-2 rounded-lg bg-white/5">
+                                        <span className="text-emerald-400 font-bold">✓</span>
+                                        <span>Contacts Offline Access</span>
+                                    </div>
+                                    <div className="flex items-center gap-2 p-2 rounded-lg bg-white/5">
+                                        <span className="text-emerald-400 font-bold">✓</span>
+                                        <span>Auto-Sync on Reconnect</span>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     )}

@@ -1,9 +1,13 @@
-const CACHE_NAME = "chatapp-shell-v1";
+const CACHE_NAME = "chatapp-shell-v2";
 const STATIC_ASSETS = [
     "/",
     "/index.html",
+    "/manifest.json",
     "/favicon.svg",
-    "/icons.svg"
+    "/icons.svg",
+    "/pwa-192x192.png",
+    "/pwa-512x512.png",
+    "/apple-touch-icon.png"
 ];
 
 // Install: Cache core application shell
