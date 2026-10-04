@@ -3,7 +3,9 @@ import UserModel from '../models/User.js';
 
 const protect = async (req, res, next) => {
     try {
-        const accessToken = req.cookies.accessToken;
+        const accessToken =
+            req.cookies?.accessToken ||
+            req.headers?.authorization?.replace(/^Bearer\s+/i, "");
 
         if (!accessToken) {
             return res.status(401).json({

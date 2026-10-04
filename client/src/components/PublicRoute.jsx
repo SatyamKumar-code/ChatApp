@@ -2,8 +2,11 @@ import { useContext } from "react";
 import { Navigate } from "react-router-dom";
 import { AuthContext } from "../context/AuthContext";
 
-
-const ProtectedRoute = ({ children }) => {
+/**
+ * PublicRoute (Guest Only)
+ * If user is already authenticated, redirects them away from /login or /register to home ("/")
+ */
+const PublicRoute = ({ children }) => {
     const { user, loading } = useContext(AuthContext);
 
     if (loading) {
@@ -13,10 +16,12 @@ const ProtectedRoute = ({ children }) => {
             </div>
         );
     }
-    if (!user) {
-        return <Navigate to="/login" replace />;
+
+    if (user) {
+        return <Navigate to="/" replace />;
     }
+
     return children;
 };
 
-export default ProtectedRoute;
+export default PublicRoute;

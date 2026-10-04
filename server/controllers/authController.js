@@ -4,11 +4,18 @@ import UserModel from '../models/User.js';
 import { generateAccessToken, generateRefreshToken } from '../utils/generateToken.js';
 
 
+const isProduction =
+    process.env.NODE_ENV === "production" ||
+    process.env.RENDER === "true" ||
+    Boolean(process.env.RENDER) ||
+    (process.env.CLIENT_URL && process.env.CLIENT_URL.startsWith("https://"));
+
 const cookieOptions = {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-}
+    secure: isProduction,
+    sameSite: isProduction ? "none" : "lax",
+    path: "/",
+};
 
 const registerUser = async (req, res) => {
     try {
@@ -259,16 +266,23 @@ const refreshAccessToken = async (req, res) => {
             message: "Access token refreshed",
             success: true,
             error: false,
+            accessToken: newAccessToken,
         });
-
 
     } catch (error) {
         console.error("Refresh token error:", error.message);
-        res.status(500).json({
-            message: "server error",
+        if (error.name === "TokenExpiredError") {
+            return res.status(401).json({
+                message: "Refresh token expired",
+                success: false,
+                error: true
+            });
+        }
+        return res.status(401).json({
+            message: "Invalid refresh token",
             success: false,
             error: true
-        })
+        });
     }
 }
 

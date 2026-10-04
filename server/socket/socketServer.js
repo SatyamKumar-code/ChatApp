@@ -47,48 +47,52 @@ const setupSocket = (io) => {
 
   io.use(async (socket, next) => {
     try {
-      const cookieHeader =
-        socket.handshake.headers.cookie;
-
+      const cookieHeader = socket.handshake.headers.cookie;
       const cookies = parseCookies(cookieHeader);
+      let userId = null;
 
-      const accessToken = cookies.accessToken;
-
-      if (!accessToken) {
-        return next(
-          new Error("Authentication required")
-        );
+      if (cookies.accessToken) {
+        try {
+          const decoded = jwt.verify(
+            cookies.accessToken,
+            process.env.JWT_ACCESS_SECRET
+          );
+          userId = decoded.userId;
+        } catch (jwtErr) {
+          // Access token might be expired; fallback to refreshToken below
+        }
       }
 
-      const decoded = jwt.verify(
-        accessToken,
-        process.env.JWT_ACCESS_SECRET
-      );
+      // Fallback: If accessToken is missing or expired, check valid refreshToken
+      if (!userId && cookies.refreshToken) {
+        try {
+          const refreshDecoded = jwt.verify(
+            cookies.refreshToken,
+            process.env.JWT_REFRESH_SECRET
+          );
+          userId = refreshDecoded.userId;
+        } catch (rErr) {
+          // Both tokens invalid or expired
+        }
+      }
 
-      const user = await User.findById(
-        decoded.userId
-      ).select(
+      if (!userId) {
+        return next(new Error("Authentication required"));
+      }
+
+      const user = await User.findById(userId).select(
         "_id name phone profilePic isOnline lastSeen"
       );
 
       if (!user) {
-        return next(
-          new Error("User not found")
-        );
+        return next(new Error("User not found"));
       }
 
       socket.user = user;
-
       next();
     } catch (error) {
-      console.error(
-        "Socket authentication error:",
-        error.message
-      );
-
-      next(
-        new Error("Invalid socket authentication")
-      );
+      console.error("Socket authentication error:", error.message);
+      next(new Error("Invalid socket authentication"));
     }
   });
 
