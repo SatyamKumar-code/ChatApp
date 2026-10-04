@@ -1,0 +1,41 @@
+{
+  "expo": {
+    "name": "ChatApp",
+    "slug": "chatapp",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "chatapp",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0c0c18"
+    },
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "com.chatapp.messenger",
+      "adaptiveIcon": {
+        "backgroundColor": "#0c0c18",
+        "foregroundImage": "./assets/android-icon-foreground.png"
+      },
+      "permissions": [
+        "INTERNET",
+        "ACCESS_NETWORK_STATE",
+        "RECORD_AUDIO",
+        "MODIFY_AUDIO_SETTINGS",
+        "CAMERA"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "fbae80be-1df9-4ab9-8370-642a0bc77029"
+      }
+    }
+  }
+}

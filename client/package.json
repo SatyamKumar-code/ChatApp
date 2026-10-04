@@ -7,14 +7,9 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview",
-    "cap:sync": "vite build && npx cap sync",
-    "cap:android": "vite build && npx cap sync android && npx cap open android"
+    "preview": "vite preview"
   },
   "dependencies": {
-    "@capacitor/android": "^8.5.2",
-    "@capacitor/cli": "^8.5.2",
-    "@capacitor/core": "^8.5.2",
     "@mui/icons-material": "^9.4.0",
     "@mui/material": "^9.4.0",
     "@mui/styled-engine-sc": "^9.4.0",
