@@ -280,7 +280,7 @@ export const ChatHeader = ({
 
                             {/* Delete Dropdown Menu */}
                             {showDeleteSelectModal && (
-                                <div className="absolute right-0 top-11 w-48 bg-[#16162c] border border-white/10 rounded-2xl shadow-2xl py-1.5 z-50 animate-in fade-in zoom-in-95 duration-150 backdrop-blur-xl divide-y divide-white/5">
+                                <div className="dropdown-menu absolute right-0 top-11 w-48 bg-[#16162c] border border-white/10 rounded-2xl shadow-2xl py-1.5 z-50 animate-in fade-in zoom-in-95 duration-150 backdrop-blur-xl divide-y divide-white/5">
                                     <button
                                         type="button"
                                         onClick={() => {
@@ -364,7 +364,7 @@ export const ChatHeader = ({
                             </button>
 
                             {isSelectMenuOpen && (
-                                <div className="absolute right-0 top-11 w-48 bg-[#16162c] border border-white/10 rounded-2xl shadow-2xl py-1.5 z-50 animate-in fade-in zoom-in-95 duration-150 backdrop-blur-xl divide-y divide-white/5">
+                                <div className="dropdown-menu absolute right-0 top-11 w-48 bg-[#16162c] border border-white/10 rounded-2xl shadow-2xl py-1.5 z-50 animate-in fade-in zoom-in-95 duration-150 backdrop-blur-xl divide-y divide-white/5">
                                     <button
                                         type="button"
                                         onClick={() => {
@@ -810,7 +810,7 @@ export const ChatHeader = ({
 
                         {/* 3-Dots Dropdown Popup */}
                         {isMenuOpen && (
-                            <div className="absolute right-0 top-11 w-56 bg-[#16162c] border border-white/10 rounded-2xl shadow-2xl py-1.5 z-50 animate-in fade-in zoom-in-95 duration-150 backdrop-blur-xl divide-y divide-white/5">
+                            <div className="dropdown-menu absolute right-0 top-11 w-56 bg-[#16162c] border border-white/10 rounded-2xl shadow-2xl py-1.5 z-50 animate-in fade-in zoom-in-95 duration-150 backdrop-blur-xl divide-y divide-white/5">
                                 <div className="py-1">
                                     {/* 1. Chat Theme */}
                                     <button

@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
 @import "tailwindcss";
 
 :root {
@@ -29,113 +29,438 @@ html[data-theme="light"] {
   --bg-card: #cad2dc;
   --bg-card-subtle: #b6c0cb;
   --bg-input: #aeb8c4;
-  --bg-hover: rgba(0, 0, 0, 0.1);
+  --bg-hover: rgba(0, 0, 0, 0.08);
   --border-color: rgba(0, 0, 0, 0.16);
   --text-primary: #000000;
-  --text-secondary: #1a202c;
-  --text-muted: #2d3748;
+  --text-secondary: #0f172a;
+  --text-muted: #1e293b;
   --bubble-incoming: #cad3dd;
   --bubble-incoming-text: #000000;
   --modal-bg: #c4cdd8;
   --modal-header: #b5bfcb;
 }
 
-/* Light mode overrides for smooth instant adaptation across elements */
+/* ========================================================
+   LIGHT MODE: COMPREHENSIVE THEME OVERRIDES
+   ======================================================== */
+
 html.light body {
   background-color: var(--bg-app) !important;
   color: var(--text-primary) !important;
 }
 
-html.light .bg-\[\#0a0a14\],
-html.light .bg-\[\#0a0a16\] {
+/* 1. App background containers */
+html.light [class*="bg-[#0a0a14]"],
+html.light [class*="bg-[#0a0a16]"] {
   background-color: var(--bg-app) !important;
 }
 
-html.light .bg-\[\#0c0c18\],
-html.light .bg-\[\#0c0c1a\] {
+/* 2. Left Navigation Rail */
+html.light aside,
+html.light [class*="bg-[#0c0c18]"],
+html.light [class*="bg-[#0c0c1a]"] {
   background-color: var(--bg-rail) !important;
+  border-color: rgba(0, 0, 0, 0.14) !important;
 }
 
-html.light .bg-\[\#0f0f1c\],
-html.light .bg-\[\#111124\],
-html.light .bg-\[\#121224\] {
+html.light aside nav button:not([class*="bg-purple-600"]) {
+  color: #1e293b !important;
+}
+
+html.light aside nav button:not([class*="bg-purple-600"]):hover {
+  background-color: rgba(0, 0, 0, 0.08) !important;
+  color: #000000 !important;
+}
+
+/* 3. Sidebars & Headers */
+html.light header,
+html.light [class*="bg-[#0f0f1c]"],
+html.light [class*="bg-[#111124]"] {
   background-color: var(--bg-sidebar) !important;
+  border-color: rgba(0, 0, 0, 0.14) !important;
+  color: #000000 !important;
 }
 
-html.light .bg-\[\#16162a\],
-html.light .bg-\[\#16162c\],
-html.light .bg-\[\#16162e\],
-html.light .bg-\[\#181830\],
-html.light .bg-\[\#181832\],
-html.light .bg-\[\#1e1e35\],
-html.light .bg-\[\#151528\],
-html.light .bg-\[\#141426\] {
+/* 4. Modal Popups & Dialogs */
+html.light [class*="bg-[#121224]"],
+html.light [class*="bg-[#14142a]"] {
+  background-color: var(--modal-bg) !important;
+  border-color: rgba(0, 0, 0, 0.16) !important;
+  color: #000000 !important;
+}
+
+html.light [class*="bg-[#16162e]"],
+html.light [class*="bg-[#181832]"] {
+  background-color: var(--modal-header) !important;
+  border-bottom-color: rgba(0, 0, 0, 0.14) !important;
+  color: #000000 !important;
+}
+
+/* 5. Cards, Inner Panels & Inputs */
+html.light [class*="bg-[#131325]"],
+html.light [class*="bg-[#141426]"],
+html.light [class*="bg-[#141428]"],
+html.light [class*="bg-[#101020]"],
+html.light [class*="bg-[#16162a]"],
+html.light [class*="bg-[#181830]"],
+html.light [class*="bg-[#181832]"],
+html.light [class*="bg-[#1e1e35]"],
+html.light [class*="bg-[#151528]"],
+html.light [class*="bg-[#101024]"],
+html.light [class*="bg-[#1b1b36]"],
+html.light [class*="bg-[#161628]"],
+html.light [class*="bg-[#18182f]"],
+html.light [class*="bg-[#1a1426]"],
+html.light [class*="bg-[#1d1d36]"],
+html.light [class*="bg-[#252545]"] {
   background-color: var(--bg-card) !important;
+  border-color: rgba(0, 0, 0, 0.14) !important;
   color: var(--text-primary) !important;
 }
 
-/* Light mode chat item selection */
-html.light .group.border-l-3.bg-\[\#181830\] {
-  background-color: #aeb8c4 !important;
+/* Chat Theme Modal (Image Upload & Opacity Slider boxes) */
+html.light [class*="bg-[#131325]"] {
+  background-color: #cad3dd !important;
+  border: 1px solid rgba(0, 0, 0, 0.16) !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05) !important;
 }
 
+html.light [class*="bg-[#131325]"] h4,
+html.light [class*="bg-[#131325]"] span:not(.text-purple-400) {
+  color: #000000 !important;
+  font-weight: 600 !important;
+}
+
+html.light [class*="bg-[#131325]"] p {
+  color: #334155 !important;
+  font-weight: 500 !important;
+}
+
+html.light [class*="bg-[#131325]"] .text-purple-400 {
+  color: #4c1d95 !important;
+  font-weight: 700 !important;
+}
+
+/* Chat Theme Modal tab switcher & theme cards */
+html.light [class*="bg-[#141426]"] {
+  background-color: #b8c3ce !important;
+  border-color: rgba(0, 0, 0, 0.14) !important;
+}
+
+html.light [class*="bg-[#141426]"] button:not([class*="bg-purple-600"]) span {
+  color: #0f172a !important;
+}
+
+html.light [class*="bg-[#141426]"] button[class*="bg-purple-600"] span {
+  color: #ffffff !important;
+}
+
+html.light button[class*="bg-[#141426]"] span {
+  color: #000000 !important;
+  font-weight: 600 !important;
+}
+
+/* Forward snippet preview */
+html.light [class*="bg-purple-950/20"] {
+  background-color: rgba(109, 40, 217, 0.18) !important;
+  border-bottom-color: rgba(109, 40, 217, 0.3) !important;
+}
+
+html.light [class*="bg-purple-950/20"] span {
+  color: #4c1d95 !important;
+  font-weight: 700 !important;
+}
+
+html.light [class*="bg-purple-950/20"] p {
+  color: #000000 !important;
+  font-weight: 600 !important;
+}
+
+/* ========================================================
+   MESSAGE CONTEXT MENU (FORWARD, COPY, REPLY, DELETE)
+   ======================================================== */
+
+html.light .message-context-menu,
+html.light .dropdown-menu,
+html.light [class*="bg-[#1a1a32]"],
+html.light [class*="bg-[#16162c]"] {
+  background-color: #cad3dd !important;
+  border: 1px solid rgba(0, 0, 0, 0.18) !important;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.22), 0 8px 10px -6px rgba(0, 0, 0, 0.15) !important;
+  color: #000000 !important;
+}
+
+html.light .message-context-menu button,
+html.light .dropdown-menu button,
+html.light [class*="bg-[#1a1a32]"] button,
+html.light [class*="bg-[#16162c]"] button {
+  color: #000000 !important;
+  font-weight: 600 !important;
+}
+
+html.light .message-context-menu button svg,
+html.light .dropdown-menu button svg,
+html.light [class*="bg-[#1a1a32]"] button svg,
+html.light [class*="bg-[#16162c]"] button svg:not(.text-rose-400):not(.text-red-400):not(.text-emerald-400):not(.text-amber-400):not(.text-purple-400) {
+  color: #1e293b !important;
+}
+
+html.light .message-context-menu button:hover,
+html.light .dropdown-menu button:hover,
+html.light [class*="bg-[#1a1a32]"] button:hover,
+html.light [class*="bg-[#16162c]"] button:hover {
+  background-color: rgba(0, 0, 0, 0.1) !important;
+  color: #000000 !important;
+}
+
+html.light .message-context-menu .bg-white\/10,
+html.light .dropdown-menu .bg-white\/10 {
+  background-color: rgba(0, 0, 0, 0.12) !important;
+}
+
+/* 6. Text inputs and search bars */
 html.light input,
 html.light textarea {
   color: #000000 !important;
   font-weight: 500;
 }
 
-html.light input::placeholder,
-html.light textarea::placeholder {
-  color: #374151 !important;
-}
-
-html.light .text-white {
+html.light input[class*="bg-"],
+html.light div[class*="bg-[#181830]/80"] {
+  background-color: var(--bg-input) !important;
+  border-color: rgba(0, 0, 0, 0.16) !important;
   color: #000000 !important;
 }
 
+html.light input::placeholder,
+html.light textarea::placeholder {
+  color: #475569 !important;
+}
+
+/* ========================================================
+   SELECTION STATES (DARKER, PROMINENT CONTRAST)
+   ======================================================== */
+
+/* 7. Selected chat conversation item in sidebar */
+html.light .selected-chat-item,
+html.light .group.border-purple-500,
+html.light [class*="border-purple-500"].group {
+  background-color: #8393a7 !important;
+  border-left: 4px solid #6d28d9 !important;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.08) !important;
+}
+
+html.light .selected-chat-item h3,
+html.light .selected-chat-item h3 *,
+html.light .group.border-purple-500 h3,
+html.light [class*="border-purple-500"].group h3 {
+  color: #000000 !important;
+  font-weight: 800 !important;
+}
+
+html.light .selected-chat-item p,
+html.light .selected-chat-item p *,
+html.light .group.border-purple-500 p,
+html.light [class*="border-purple-500"].group p {
+  color: #000000 !important;
+  font-weight: 600 !important;
+}
+
+html.light .selected-chat-item span,
+html.light .group.border-purple-500 span {
+  color: #0f172a !important;
+  font-weight: 700 !important;
+}
+
+/* 8. Selected message row (multi-select mode) - richer, darker highlight */
+html.light .selected-message-item {
+  background-color: rgba(91, 33, 182, 0.45) !important;
+  border: 2px solid rgba(91, 33, 182, 0.8) !important;
+  box-shadow: 0 4px 12px rgba(91, 33, 182, 0.25) !important;
+}
+
+/* 9. Active filter pills, tabs & buttons (All, Direct, Groups, Settings Tabs) - Dark Purple */
+html.light .bg-purple-600\/20,
+html.light .bg-purple-600\/15,
+html.light .bg-purple-600\/25,
+html.light [class*="bg-purple-600/"],
+html.light button[class*="bg-purple-600/"] {
+  background-color: #5b21b6 !important; /* Deep dark purple (purple-800) */
+  border-color: #4c1d95 !important;
+  color: #ffffff !important;
+  box-shadow: 0 2px 5px rgba(91, 33, 182, 0.35) !important;
+}
+
+html.light button[class*="bg-purple-600/"] *,
+html.light .bg-purple-600\/20 *,
+html.light [class*="bg-purple-600/"] * {
+  color: #ffffff !important;
+}
+
+html.light .text-purple-200,
+html.light .text-purple-300,
+html.light .text-purple-400 {
+  color: #3b0764 !important; /* Rich deep dark purple text */
+  font-weight: 700 !important;
+}
+
+html.light .bg-purple-500\/10,
+html.light .bg-purple-500\/20,
+html.light [class*="bg-purple-500/"] {
+  background-color: rgba(91, 33, 182, 0.3) !important;
+  border-color: rgba(91, 33, 182, 0.55) !important;
+}
+
+/* 10. Selected candidate rows in Modals (ForwardModal, CreateGroupModal) */
+html.light [class*="bg-purple-900/15"],
+html.light [class*="bg-purple-600/10"],
+html.light [class*="bg-purple-600/15"] {
+  background-color: rgba(109, 40, 217, 0.32) !important;
+}
+
+/* 11. Multi-select header bar */
+html.light header span.font-mono.text-white,
+html.light header span.text-base.text-white,
+html.light header span.text-lg.text-white,
+html.light header h2.text-white {
+  color: #000000 !important;
+}
+
+html.light header button {
+  color: #0f172a !important;
+}
+
+html.light header button:hover {
+  background-color: rgba(0, 0, 0, 0.08) !important;
+  color: #000000 !important;
+}
+
+/* 12. OUTGOING MESSAGE BUBBLES - MUST retain crisp white text on purple gradient */
+html.light [class*="from-purple-600"][class*="to-indigo-600"],
+html.light [class*="from-purple-600"][class*="to-indigo-600"] * {
+  color: #ffffff !important;
+}
+
+html.light [class*="from-purple-600"][class*="to-indigo-600"] .text-purple-200,
+html.light [class*="from-purple-600"][class*="to-indigo-600"] .text-purple-300,
+html.light [class*="from-purple-600"][class*="to-indigo-600"] .text-purple-400,
+html.light [class*="from-purple-600"][class*="to-indigo-600"] [class*="text-purple-200"],
+html.light [class*="from-purple-600"][class*="to-indigo-600"] [class*="text-purple-300"] {
+  color: #f3e8ff !important;
+}
+
+html.light [class*="from-purple-600"][class*="to-indigo-600"] .text-cyan-400 {
+  color: #67e8f9 !important;
+}
+
+/* 13. PRIMARY BUTTONS & COLORED BADGES - MUST retain crisp white text */
+html.light button[class*="bg-purple-600"],
+html.light button[class*="bg-purple-600"] *,
+html.light [class*="bg-purple-600"].text-white,
+html.light [class*="bg-purple-600"].text-white *,
+html.light aside nav button[class*="bg-purple-600"],
+html.light aside nav button[class*="bg-purple-600"] *,
+html.light [class*="bg-rose-500"]:not(.settings-logout-btn):not([class*="bg-rose-500/"]),
+html.light [class*="bg-rose-500"]:not(.settings-logout-btn):not([class*="bg-rose-500/"]) *,
+html.light [class*="bg-emerald-500"],
+html.light [class*="bg-emerald-500"] * {
+  color: #ffffff !important;
+}
+
+/* Settings Account Logout button in Light Mode */
+html.light .settings-logout-btn,
+html.light button.settings-logout-btn {
+  background-color: rgba(225, 29, 72, 0.28) !important;
+  border-color: rgba(225, 29, 72, 0.65) !important;
+  color: #881337 !important;
+  font-weight: 700 !important;
+  box-shadow: 0 1px 3px rgba(225, 29, 72, 0.15) !important;
+}
+
+html.light .settings-logout-btn svg,
+html.light .settings-logout-btn * {
+  color: #881337 !important;
+}
+
+html.light .settings-logout-btn:hover {
+  background-color: rgba(225, 29, 72, 0.42) !important;
+  border-color: rgba(225, 29, 72, 0.85) !important;
+  color: #4c0519 !important;
+}
+
+html.light .settings-logout-btn:hover * {
+  color: #4c0519 !important;
+}
+
+/* 14. General dark text in light mode */
 html.light .text-zinc-100,
 html.light .text-zinc-200 {
-  color: #050505 !important;
+  color: #000000 !important;
 }
 
 html.light .text-zinc-300,
 html.light .text-zinc-400 {
-  color: #1a202c !important;
+  color: #0f172a !important;
 }
 
 html.light .text-zinc-500 {
-  color: #2d3748 !important;
+  color: #334155 !important;
 }
 
-html.light .border-white\/5,
-html.light .border-white\/10,
-html.light .border-white\/20,
-html.light .divide-white\/5,
-html.light .divide-white\/10 {
+/* Outgoing Chat Bubbles & Previews - always crisp white text in both dark & light modes */
+.chat-bubble-outgoing,
+.chat-bubble-outgoing *,
+html.light .chat-bubble-outgoing,
+html.light .chat-bubble-outgoing * {
+  color: #ffffff !important;
+}
+
+/* Standalone .text-white on non-colored elements should be black */
+html.light h1.text-white,
+html.light h2.text-white,
+html.light h3.text-white,
+html.light h4.text-white,
+html.light p.text-white,
+html.light div.text-white:not([class*="from-purple"]):not([class*="bg-purple"]):not([class*="bg-rose"]):not([class*="bg-emerald"]):not(.chat-bubble-outgoing):not([class*="chat-bubble-outgoing"]) {
+  color: #000000 !important;
+}
+
+/* 15. Borders, dividers and hover states */
+html.light [class*="border-white/"],
+html.light [class*="divide-white/"] {
   border-color: rgba(0, 0, 0, 0.14) !important;
 }
 
-html.light .hover\:bg-white\/5:hover,
-html.light .hover\:bg-white\/10:hover,
-html.light .hover\:bg-white\/\[0\.03\]:hover {
+html.light [class*="hover:bg-white/"]:hover {
   background-color: rgba(0, 0, 0, 0.08) !important;
 }
 
-html.light .bg-white\/5 {
+html.light [class*="bg-white/5"] {
   background-color: rgba(0, 0, 0, 0.05) !important;
 }
 
-html.light .bg-white\/10 {
+html.light [class*="bg-white/10"] {
   background-color: rgba(0, 0, 0, 0.09) !important;
 }
 
+/* 16. Scrollbars in light mode */
 html.light ::-webkit-scrollbar-thumb {
   background: rgba(0, 0, 0, 0.25) !important;
 }
 
 html.light ::-webkit-scrollbar-thumb:hover {
   background: rgba(0, 0, 0, 0.4) !important;
+}
+
+/* 17. Mouse text selection */
+::selection {
+  background-color: #7c3aed;
+  color: #ffffff !important;
+}
+
+html.light ::selection {
+  background-color: #4338ca !important;
+  color: #ffffff !important;
 }
 
 @layer base {

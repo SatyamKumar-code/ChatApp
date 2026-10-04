@@ -8,10 +8,24 @@ export const THEME_MODES = {
     DARK: "dark",
 };
 
+export const ACCENT_PALETTES = {
+    "#7c3aed": { name: "Royal Purple", color: "#7c3aed", endColor: "#4f46e5" },
+    "#2563eb": { name: "Stream Blue", color: "#2563eb", endColor: "#4338ca" },
+    "#059669": { name: "Emerald Green", color: "#059669", endColor: "#0f766e" },
+    "#0891b2": { name: "Cyan Teal", color: "#0891b2", endColor: "#2563eb" },
+    "#e11d48": { name: "Rose Ruby", color: "#e11d48", endColor: "#db2777" },
+    "#d97706": { name: "Sunset Amber", color: "#d97706", endColor: "#ea580c" },
+};
+
 export const ThemeProvider = ({ children }) => {
     // Mode can be: 'system' | 'light' | 'dark' (default: 'system')
     const [themeMode, setThemeMode] = useState(() => {
         return localStorage.getItem("chatapp_theme_mode") || THEME_MODES.SYSTEM;
+    });
+
+    // Accent Color Palette
+    const [accentColor, setAccentColor] = useState(() => {
+        return localStorage.getItem("chatapp_accent") || "#7c3aed";
     });
 
     // Resolved actual theme: 'light' or 'dark'
@@ -24,6 +38,7 @@ export const ThemeProvider = ({ children }) => {
             : "dark";
     });
 
+    // Sync themeMode to documentElement
     useEffect(() => {
         const mediaQuery = window.matchMedia("(prefers-color-scheme: light)");
 
@@ -69,9 +84,27 @@ export const ThemeProvider = ({ children }) => {
         }
     }, [themeMode]);
 
+    // Sync accentColor to CSS custom properties
+    useEffect(() => {
+        const root = document.documentElement;
+        const palette = ACCENT_PALETTES[accentColor] || ACCENT_PALETTES["#7c3aed"];
+        root.style.setProperty("--accent-primary", palette.color);
+        root.style.setProperty("--accent-end", palette.endColor);
+        root.style.setProperty(
+            "--accent-bubble",
+            `linear-gradient(135deg, ${palette.color}, ${palette.endColor})`
+        );
+        root.style.setProperty("--accent-shadow", `0 4px 14px ${palette.color}40`);
+    }, [accentColor]);
+
     const changeThemeMode = (mode) => {
         setThemeMode(mode);
         localStorage.setItem("chatapp_theme_mode", mode);
+    };
+
+    const changeAccentColor = (color) => {
+        setAccentColor(color);
+        localStorage.setItem("chatapp_accent", color);
     };
 
     return (
@@ -82,6 +115,9 @@ export const ThemeProvider = ({ children }) => {
                 isLight: resolvedTheme === "light",
                 isDark: resolvedTheme === "dark",
                 changeThemeMode,
+                accentColor,
+                changeAccentColor,
+                ACCENT_PALETTES,
                 THEME_MODES,
             }}
         >

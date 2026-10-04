@@ -15,6 +15,29 @@ import { encryptMessage, decryptMessage } from "../utils/e2ee";
 
 export const ChatContext = createContext();
 
+// Helper to decrypt both the message's own text and any quoted replyTo text
+const decryptMsgPayload = async (msg, convId) => {
+    if (!msg) return msg;
+    const cid = convId || msg.conversation?._id || msg.conversation;
+    let text = msg.text;
+    if (text && cid) {
+        try {
+            text = await decryptMessage(text, cid);
+        } catch (e) {
+            console.error("Decrypt message text error:", e);
+        }
+    }
+    let replyTo = msg.replyTo;
+    if (replyTo && typeof replyTo === "object" && replyTo.text && cid) {
+        try {
+            const replyText = await decryptMessage(replyTo.text, cid);
+            replyTo = { ...replyTo, text: replyText };
+        } catch (e) {
+            console.error("Decrypt replyTo text error:", e);
+        }
+    }
+    return { ...msg, text, replyTo };
+};
 
 const ChatProvider = ({ children }) => {
     const { user } = useContext(AuthContext);
@@ -162,11 +185,7 @@ const ChatProvider = ({ children }) => {
             }
 
             const convId = message.conversation?._id || message.conversation;
-            let decryptedMessage = message;
-            if (message.text && convId) {
-                const decryptedText = await decryptMessage(message.text, convId);
-                decryptedMessage = { ...message, text: decryptedText };
-            }
+            const decryptedMessage = await decryptMsgPayload(message, convId);
 
             setMessages((prev) => {
                 // Prevent duplicate message
@@ -436,13 +455,7 @@ const ChatProvider = ({ children }) => {
         const handlePinnedMessagesUpdated = async (data) => {
             const { conversationId, pinnedMessages } = data;
             const decryptedPinned = await Promise.all(
-                (pinnedMessages || []).map(async (msg) => {
-                    if (msg.text) {
-                        const decryptedText = await decryptMessage(msg.text, conversationId);
-                        return { ...msg, text: decryptedText };
-                    }
-                    return msg;
-                })
+                (pinnedMessages || []).map((msg) => decryptMsgPayload(msg, conversationId))
             );
 
             setSelectedConversation((prev) => {
@@ -658,13 +671,7 @@ const ChatProvider = ({ children }) => {
             if (response.data.success) {
                 const rawMsgs = response.data.messages || [];
                 const decryptedMsgs = await Promise.all(
-                    rawMsgs.map(async (msg) => {
-                        if (msg.text) {
-                            const decryptedText = await decryptMessage(msg.text, conversationId);
-                            return { ...msg, text: decryptedText };
-                        }
-                        return msg;
-                    })
+                    rawMsgs.map((msg) => decryptMsgPayload(msg, conversationId))
                 );
                 setMessages(decryptedMsgs);
             }
@@ -881,13 +888,7 @@ const ChatProvider = ({ children }) => {
             const updatedPinned = res.data?.pinnedMessages || [];
 
             const decryptedPinned = await Promise.all(
-                updatedPinned.map(async (msg) => {
-                    if (msg.text) {
-                        const decryptedText = await decryptMessage(msg.text, convId);
-                        return { ...msg, text: decryptedText };
-                    }
-                    return msg;
-                })
+                updatedPinned.map((msg) => decryptMsgPayload(msg, convId))
             );
 
             setSelectedConversation((prev) => {
@@ -955,14 +956,7 @@ const ChatProvider = ({ children }) => {
             const res = await api.get("/messages/starred/all", { params });
             const list = res.data?.starredMessages || [];
             const decryptedList = await Promise.all(
-                list.map(async (msg) => {
-                    const convId = msg.conversation?._id || msg.conversation;
-                    if (msg.text && convId) {
-                        const decryptedText = await decryptMessage(msg.text, convId);
-                        return { ...msg, text: decryptedText };
-                    }
-                    return msg;
-                })
+                list.map((msg) => decryptMsgPayload(msg))
             );
             return decryptedList;
         } catch (err) {
@@ -979,13 +973,7 @@ const ChatProvider = ({ children }) => {
             let convToSet = conversation;
             if (conversation.pinnedMessages && conversation.pinnedMessages.length > 0) {
                 const decryptedPinned = await Promise.all(
-                    conversation.pinnedMessages.map(async (pm) => {
-                        if (pm.text) {
-                            const dt = await decryptMessage(pm.text, conversation._id);
-                            return { ...pm, text: dt };
-                        }
-                        return pm;
-                    })
+                    conversation.pinnedMessages.map((pm) => decryptMsgPayload(pm, conversation._id))
                 );
                 convToSet = { ...convToSet, pinnedMessages: decryptedPinned };
             }

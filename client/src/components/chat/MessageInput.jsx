@@ -1,5 +1,6 @@
-import React, { useContext, useRef, useState } from "react";
+import React, { useContext, useRef, useState, useEffect } from "react";
 import { ChatContext } from "../../context/ChatContext";
+import { decryptMessage } from "../../utils/e2ee";
 
 const QUICK_EMOJIS = [
     "😊", "😂", "❤️", "👍", "🔥", "🎉", "🙏", "✨",
@@ -22,8 +23,40 @@ const formatDuration = (seconds) => {
 };
 
 export const MessageInput = ({ onSendMessage, onTyping, onStopTyping, disabled = false, disabledReason = "" }) => {
-    const { replyingTo, clearReplyingTo } = useContext(ChatContext);
+    const { replyingTo, clearReplyingTo, selectedConversation, messages } = useContext(ChatContext);
     const [text, setText] = useState("");
+
+    // Decrypted preview text for the quoted reply message
+    const [replyPreviewText, setReplyPreviewText] = useState(() => {
+        if (!replyingTo?.text) return "";
+        return replyingTo.text.startsWith("enc:v1:") ? "" : replyingTo.text;
+    });
+
+    useEffect(() => {
+        if (!replyingTo?.text) {
+            setReplyPreviewText("");
+            return;
+        }
+
+        if (messages && replyingTo._id) {
+            const found = messages.find((m) => m._id === replyingTo._id);
+            if (found?.text && !found.text.startsWith("enc:v1:")) {
+                setReplyPreviewText(found.text);
+                return;
+            }
+        }
+
+        if (replyingTo.text.startsWith("enc:v1:")) {
+            const convId = selectedConversation?._id || replyingTo.conversation;
+            if (convId) {
+                decryptMessage(replyingTo.text, convId).then((plain) => {
+                    setReplyPreviewText(plain);
+                });
+            }
+        } else {
+            setReplyPreviewText(replyingTo.text);
+        }
+    }, [replyingTo?.text, replyingTo?._id, selectedConversation?._id, messages]);
     const [showEmojiPicker, setShowEmojiPicker] = useState(false);
     const [showAttachMenu, setShowAttachMenu] = useState(false);
     const [selectedFile, setSelectedFile] = useState(null);
@@ -314,7 +347,11 @@ export const MessageInput = ({ onSendMessage, onTyping, onStopTyping, disabled =
                                     `📄 ${replyingTo.fileName || "Document"}`}
                                 {(!replyingTo.messageType ||
                                     replyingTo.messageType === "text") &&
-                                    (replyingTo.text || "Message")}
+                                    (replyPreviewText ||
+                                        (!replyingTo.text?.startsWith("enc:v1:")
+                                            ? replyingTo.text
+                                            : "Message") ||
+                                        "Message")}
                             </p>
                         </div>
                     </div>

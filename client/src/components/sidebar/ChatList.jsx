@@ -415,7 +415,7 @@ export const ChatList = ({
                                     onClick={() => handleItemClick(conv)}
                                     className={`group relative flex items-center gap-3.5 px-4 py-3 cursor-pointer transition-all border-l-3 ${
                                         isSelected
-                                            ? "bg-[#181830] border-purple-500 shadow-inner"
+                                            ? "selected-chat-item bg-[#181830] border-purple-500 shadow-inner"
                                             : conv.isPinned
                                             ? "bg-purple-950/15 border-purple-500/40 hover:bg-purple-950/25"
                                             : "border-transparent hover:bg-white/[0.03]"

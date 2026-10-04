@@ -3,6 +3,7 @@ import AudioPlayer from "./AudioPlayer";
 import Avatar from "../common/Avatar";
 import { CallContext } from "../../context/CallContext";
 import { ChatContext } from "../../context/ChatContext";
+import { decryptMessage } from "../../utils/e2ee";
 
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
 const EXTRA_REACTIONS = [
@@ -33,9 +34,45 @@ export const MessageBubble = ({
     isPinned = false,
     searchHighlight = "",
 }) => {
-    const { selectedMessageIds, toggleSelectMessage } = useContext(ChatContext) || {};
+    const { selectedMessageIds, toggleSelectMessage, selectedConversation, messages } = useContext(ChatContext) || {};
     const isSelectionMode = Boolean(selectedMessageIds && selectedMessageIds.length > 0);
     const isSelected = Boolean(selectedMessageIds && selectedMessageIds.includes(message._id));
+
+    // Decrypted text for quoted reply message
+    const [replyText, setReplyText] = useState(() => {
+        if (!message.replyTo?.text) return "";
+        return message.replyTo.text.startsWith("enc:v1:") ? "" : message.replyTo.text;
+    });
+
+    useEffect(() => {
+        if (!message.replyTo?.text) {
+            setReplyText("");
+            return;
+        }
+
+        // If the referenced message is already in messages array, use its decrypted text
+        if (messages && message.replyTo._id) {
+            const found = messages.find((m) => m._id === message.replyTo._id);
+            if (found?.text && !found.text.startsWith("enc:v1:")) {
+                setReplyText(found.text);
+                return;
+            }
+        }
+
+        if (message.replyTo.text.startsWith("enc:v1:")) {
+            const convId =
+                message.conversation?._id ||
+                message.conversation ||
+                selectedConversation?._id;
+            if (convId) {
+                decryptMessage(message.replyTo.text, convId).then((plain) => {
+                    setReplyText(plain);
+                });
+            }
+        } else {
+            setReplyText(message.replyTo.text);
+        }
+    }, [message.replyTo?.text, message.replyTo?._id, message.conversation, selectedConversation?._id, messages]);
 
     const [showImagePreview, setShowImagePreview] = useState(false);
     const [showReactions, setShowReactions] = useState(false);
@@ -498,7 +535,7 @@ export const MessageBubble = ({
                     isMyMessage ? "items-end" : "items-start"
                 } ${
                     isSelected
-                        ? "bg-purple-600/15 rounded-2xl py-1 px-1.5 sm:px-2"
+                        ? "selected-message-item bg-purple-600/15 rounded-2xl py-1 px-1.5 sm:px-2"
                         : ""
                 }`}
             >
@@ -618,9 +655,17 @@ export const MessageBubble = ({
                     <div
                         className={`w-full rounded-2xl p-2.5 sm:px-3.5 sm:py-2.5 shadow-sm text-sm relative transition-all duration-200 ${
                             isMyMessage
-                                ? "bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-tr-xs shadow-purple-900/20"
+                                ? "chat-bubble-outgoing text-white rounded-tr-xs"
                                 : "bg-[#181830] text-zinc-100 rounded-tl-xs border border-white/5 shadow-black/20"
                         }`}
+                        style={
+                            isMyMessage
+                                ? {
+                                      background: "var(--accent-bubble, linear-gradient(135deg, #7c3aed, #4f46e5))",
+                                      boxShadow: "var(--accent-shadow, 0 4px 14px rgba(124, 58, 237, 0.25))",
+                                  }
+                                : undefined
+                        }
                     >
                         {/* Sender Name ONLY for received messages in Group Chat */}
                         {isGroup && !isMyMessage && message.sender?.name && (
@@ -687,7 +732,11 @@ export const MessageBubble = ({
                                         `📄 ${message.replyTo.fileName || "Document"}`}
                                     {(!message.replyTo.messageType ||
                                         message.replyTo.messageType === "text") &&
-                                        (message.replyTo.text || "Message")}
+                                        (replyText ||
+                                            (!message.replyTo.text?.startsWith("enc:v1:")
+                                                ? message.replyTo.text
+                                                : "Message") ||
+                                            "Message")}
                                 </div>
                             </div>
                         )}
@@ -878,7 +927,7 @@ export const MessageBubble = ({
                     {showMenu && (
                         <div
                             ref={menuRef}
-                            className={`absolute bottom-full mb-2 z-40 w-44 rounded-xl bg-[#1a1a32] border border-white/10 shadow-2xl py-1 text-xs text-zinc-200 animate-in fade-in duration-100 ${
+                            className={`message-context-menu dropdown-menu absolute bottom-full mb-2 z-40 w-44 rounded-xl bg-[#1a1a32] border border-white/10 shadow-2xl py-1 text-xs text-zinc-200 animate-in fade-in duration-100 ${
                                 isMyMessage ? "right-2" : "left-2"
                             }`}
                         >

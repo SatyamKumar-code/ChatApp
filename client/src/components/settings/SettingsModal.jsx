@@ -7,7 +7,14 @@ import { playMessageSound } from "../../utils/callSounds";
 
 export const SettingsModal = ({ isOpen, onClose }) => {
     const { user, updateProfile, logout } = useContext(AuthContext);
-    const { themeMode, changeThemeMode, resolvedTheme } = useTheme();
+    const {
+        themeMode,
+        changeThemeMode,
+        resolvedTheme,
+        accentColor,
+        changeAccentColor,
+        ACCENT_PALETTES,
+    } = useTheme();
 
     // Active tab
     const [activeTab, setActiveTab] = useState("profile");
@@ -21,9 +28,6 @@ export const SettingsModal = ({ isOpen, onClose }) => {
     const [errorMessage, setErrorMessage] = useState("");
 
     // Preferences state (stored in localStorage)
-    const [accentColor, setAccentColor] = useState(() => {
-        return localStorage.getItem("chatapp_accent") || "#7c3aed";
-    });
     const [soundEnabled, setSoundEnabled] = useState(() => {
         return localStorage.getItem("chatapp_sound") !== "false";
     });
@@ -78,9 +82,7 @@ export const SettingsModal = ({ isOpen, onClose }) => {
 
     // Save preferences
     const handleAccentChange = (color) => {
-        setAccentColor(color);
-        localStorage.setItem("chatapp_accent", color);
-        document.documentElement.style.setProperty("--accent-primary", color);
+        changeAccentColor(color);
     };
 
     const handleSoundToggle = () => {
@@ -477,26 +479,43 @@ export const SettingsModal = ({ isOpen, onClose }) => {
                                     Accent Color Theme
                                 </h4>
                                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-                                    {accentOptions.map((item) => (
-                                        <button
-                                            key={item.color}
-                                            type="button"
-                                            onClick={() => handleAccentChange(item.color)}
-                                            className={`p-3 rounded-xl border flex items-center gap-3 transition-all ${
-                                                accentColor === item.color
-                                                    ? "bg-white/10 border-purple-500 shadow-md ring-1 ring-purple-500"
-                                                    : "bg-[#181830] border-white/5 hover:border-white/20"
-                                            }`}
-                                        >
-                                            <span
-                                                className="w-5 h-5 rounded-full shrink-0 shadow-sm"
-                                                style={{ backgroundColor: item.color }}
-                                            />
-                                            <span className="text-xs font-medium text-white truncate">
-                                                {item.name}
-                                            </span>
-                                        </button>
-                                    ))}
+                                    {accentOptions.map((item) => {
+                                        const isSelected = accentColor === item.color;
+                                        return (
+                                            <button
+                                                key={item.color}
+                                                type="button"
+                                                onClick={() => handleAccentChange(item.color)}
+                                                style={
+                                                    isSelected
+                                                        ? {
+                                                              borderColor: item.color,
+                                                              boxShadow: `0 0 0 1.5px ${item.color}, 0 4px 12px ${item.color}35`,
+                                                          }
+                                                        : undefined
+                                                }
+                                                className={`p-3 rounded-xl border flex items-center gap-3 transition-all cursor-pointer text-left ${
+                                                    isSelected
+                                                        ? "bg-white/10"
+                                                        : "bg-[#181830] border-white/5 hover:border-white/20"
+                                                }`}
+                                            >
+                                                <div
+                                                    className="w-5 h-5 rounded-full shrink-0 shadow-sm flex items-center justify-center text-white text-[10px] font-bold"
+                                                    style={{ backgroundColor: item.color }}
+                                                >
+                                                    {isSelected && (
+                                                        <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                                                        </svg>
+                                                    )}
+                                                </div>
+                                                <span className="text-xs font-semibold text-zinc-900 dark:text-white truncate">
+                                                    {item.name}
+                                                </span>
+                                            </button>
+                                        );
+                                    })}
                                 </div>
                             </div>
 
@@ -510,10 +529,15 @@ export const SettingsModal = ({ isOpen, onClose }) => {
                                         Hey! How does the new theme look?
                                     </div>
                                     <div
-                                        className="self-end max-w-[80%] px-3.5 py-2 rounded-2xl rounded-br-sm text-xs text-white shadow-md"
+                                        className="chat-bubble-outgoing self-end max-w-[80%] px-3.5 py-2 rounded-2xl rounded-br-sm text-xs font-medium shadow-md transition-all duration-300"
                                         style={{
-                                            backgroundColor: accentColor,
+                                            background: `linear-gradient(135deg, ${
+                                                ACCENT_PALETTES?.[accentColor]?.color || accentColor
+                                            }, ${
+                                                ACCENT_PALETTES?.[accentColor]?.endColor || "#4f46e5"
+                                            })`,
                                             boxShadow: `0 4px 14px ${accentColor}40`,
+                                            color: "#ffffff",
                                         }}
                                     >
                                         It looks stunning! Exactly like the Figma UI Kit 🔥
@@ -651,7 +675,7 @@ export const SettingsModal = ({ isOpen, onClose }) => {
                                 <button
                                     type="button"
                                     onClick={logout}
-                                    className="w-full py-2.5 px-4 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 text-rose-400 text-xs font-semibold transition-all flex items-center justify-center gap-2"
+                                    className="settings-logout-btn w-full py-2.5 px-4 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 text-rose-400 text-xs font-semibold transition-all flex items-center justify-center gap-2 cursor-pointer"
                                 >
                                     <svg
                                         xmlns="http://www.w3.org/2000/svg"
