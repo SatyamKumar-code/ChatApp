@@ -724,14 +724,22 @@ export const ChatHeader = ({
                             <button
                                 type="button"
                                 onClick={() => {
+                                    if (!navigator.onLine) {
+                                        window.alert("Calls unavailable while offline");
+                                        return;
+                                    }
                                     if (partner.isGroup) {
                                         startGroupCall(partner, "audio");
                                     } else {
                                         startCall(partner, "audio");
                                     }
                                 }}
-                                title={partner.isGroup ? "Group Audio Call" : "Audio Call"}
-                                className="w-9 h-9 rounded-xl flex items-center justify-center text-zinc-300 hover:text-white hover:bg-white/10 transition-all cursor-pointer"
+                                title={!navigator.onLine ? "Calls unavailable while offline" : (partner.isGroup ? "Group Audio Call" : "Audio Call")}
+                                className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all ${
+                                    !navigator.onLine
+                                        ? "text-zinc-500 opacity-50 cursor-not-allowed"
+                                        : "text-zinc-300 hover:text-white hover:bg-white/10 cursor-pointer"
+                                }`}
                             >
                                 <svg
                                     xmlns="http://www.w3.org/2000/svg"
@@ -755,14 +763,22 @@ export const ChatHeader = ({
                             <button
                                 type="button"
                                 onClick={() => {
+                                    if (!navigator.onLine) {
+                                        window.alert("Calls unavailable while offline");
+                                        return;
+                                    }
                                     if (partner.isGroup) {
                                         startGroupCall(partner, "video");
                                     } else {
                                         startCall(partner, "video");
                                     }
                                 }}
-                                title={partner.isGroup ? "Group Video Call" : "Video Call"}
-                                className="w-9 h-9 rounded-xl flex items-center justify-center text-zinc-300 hover:text-white hover:bg-white/10 transition-all cursor-pointer"
+                                title={!navigator.onLine ? "Calls unavailable while offline" : (partner.isGroup ? "Group Video Call" : "Video Call")}
+                                className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all ${
+                                    !navigator.onLine
+                                        ? "text-zinc-500 opacity-50 cursor-not-allowed"
+                                        : "text-zinc-300 hover:text-white hover:bg-white/10 cursor-pointer"
+                                }`}
                             >
                                 <svg
                                     xmlns="http://www.w3.org/2000/svg"

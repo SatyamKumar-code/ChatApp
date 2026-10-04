@@ -302,7 +302,12 @@ export const CallProvider = ({ children }) => {
 
     // Start 1-on-1 Outgoing Call
     const startCall = async (targetUser, type = "video", convId = null) => {
-        if (!targetUser || !targetUser._id || !socket.connected) return;
+        if (!navigator.onLine || !socket || !socket.connected) {
+            window.alert("Calls unavailable while offline");
+            return;
+        }
+
+        if (!targetUser || !targetUser._id) return;
 
         try {
             cleanupCall();
@@ -326,13 +331,18 @@ export const CallProvider = ({ children }) => {
         } catch (err) {
             console.error("Failed to acquire media stream:", err);
             cleanupCall();
-            alert("Could not access microphone or camera. Please check browser permissions.");
+            window.alert("Microphone or camera permission required");
         }
     };
 
     // Start Group Audio / Video Call
     const startGroupCall = async (conversation, type = "video") => {
-        if (!conversation || !conversation._id || !socket.connected) return;
+        if (!navigator.onLine || !socket || !socket.connected) {
+            window.alert("Calls unavailable while offline");
+            return;
+        }
+
+        if (!conversation || !conversation._id) return;
 
         try {
             cleanupCall();
@@ -364,7 +374,7 @@ export const CallProvider = ({ children }) => {
         } catch (err) {
             console.error("Failed to start group call:", err);
             cleanupCall();
-            alert("Could not access microphone or camera. Please check permissions.");
+            window.alert("Microphone or camera permission required");
         }
     };
 

@@ -868,23 +868,42 @@ export const MessageBubble = ({
                             {/* Status Ticks for Sent Messages */}
                             {isMyMessage && (
                                 <span
-                                    className={`font-mono text-xs tracking-tighter ${message.isSeen
+                                    className={`inline-flex items-center font-mono text-xs tracking-tighter ${
+                                        message.isPending || message.status === "pending"
+                                            ? "text-zinc-300 opacity-80"
+                                            : message.isSeen
                                             ? "text-sky-300 font-bold"
                                             : "text-purple-200/80"
-                                        }`}
+                                    }`}
                                     title={
-                                        message.isSeen
+                                        message.isPending || message.status === "pending"
+                                            ? "Waiting to send (offline)"
+                                            : message.isSeen
                                             ? "Read"
                                             : message.isDelivered
-                                                ? "Delivered"
-                                                : "Sent"
+                                            ? "Delivered"
+                                            : "Sent"
                                     }
                                 >
-                                    {message.isSeen
-                                        ? "✓✓"
-                                        : message.isDelivered
-                                            ? "✓✓"
-                                            : "✓"}
+                                    {message.isPending || message.status === "pending" ? (
+                                        <svg
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            className="w-3 h-3 text-white/80 shrink-0"
+                                            fill="none"
+                                            viewBox="0 0 24 24"
+                                            stroke="currentColor"
+                                            strokeWidth={2}
+                                        >
+                                            <circle cx="12" cy="12" r="9" />
+                                            <polyline points="12 7 12 12 15 15" />
+                                        </svg>
+                                    ) : message.isSeen ? (
+                                        "✓✓"
+                                    ) : message.isDelivered ? (
+                                        "✓✓"
+                                    ) : (
+                                        "✓"
+                                    )}
                                 </span>
                             )}
                         </div>

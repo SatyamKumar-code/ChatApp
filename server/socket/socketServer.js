@@ -204,6 +204,7 @@ const setupSocket = (io) => {
           duration = 0,
           replyTo = null,
           isForwarded = false,
+          tempId = null,
         } = data;
 
         // Validate conversation ID
@@ -363,18 +364,23 @@ const setupSocket = (io) => {
         // ==============================
         // BROADCAST NEW MESSAGE
         // ==============================
+        const senderMessagePayload = tempId
+          ? { ...(populatedMessage.toObject ? populatedMessage.toObject() : populatedMessage), tempId }
+          : populatedMessage;
+
         if (conversation.isGroup) {
           conversation.participants.forEach((pId) => {
+            const isSender = pId.toString() === userId;
             io.to(`user:${pId.toString()}`).emit(
               "newMessage",
-              populatedMessage
+              isSender ? senderMessagePayload : populatedMessage
             );
           });
         } else {
           // Always emit to sender so sender sees their own message
           io.to(`user:${userId}`).emit(
             "newMessage",
-            populatedMessage
+            senderMessagePayload
           );
 
           // Emit to receiver ONLY if receiver has not blocked the sender

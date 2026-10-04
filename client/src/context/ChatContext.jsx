@@ -39,19 +39,89 @@ const decryptMsgPayload = async (msg, convId) => {
     return { ...msg, text, replyTo };
 };
 
+// Local storage cache helpers for full offline persistence
+const loadCachedConversations = () => {
+    try {
+        const saved = localStorage.getItem("chatapp_cached_conversations");
+        return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+        return [];
+    }
+};
+
+const saveCachedConversations = (convs) => {
+    try {
+        localStorage.setItem("chatapp_cached_conversations", JSON.stringify(convs));
+    } catch (e) {}
+};
+
+const loadCachedMessages = (convId) => {
+    if (!convId) return [];
+    try {
+        const saved = localStorage.getItem(`chatapp_cached_msgs_${convId}`);
+        return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+        return [];
+    }
+};
+
+const saveCachedMessages = (convId, msgs) => {
+    if (!convId || !Array.isArray(msgs)) return;
+    try {
+        localStorage.setItem(`chatapp_cached_msgs_${convId}`, JSON.stringify(msgs.slice(-150)));
+    } catch (e) {}
+};
+
+const loadCachedContacts = () => {
+    try {
+        const saved = localStorage.getItem("chatapp_cached_contacts");
+        return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+        return [];
+    }
+};
+
+const saveCachedContacts = (contacts) => {
+    try {
+        localStorage.setItem("chatapp_cached_contacts", JSON.stringify(contacts));
+    } catch (e) {}
+};
+
+// Offline Outbox Queue (Messages sent while offline to be automatically dispatched when online)
+const OUTBOX_STORAGE_KEY = "chatapp_offline_outbox_queue";
+
+const loadOutbox = () => {
+    try {
+        const saved = localStorage.getItem(OUTBOX_STORAGE_KEY);
+        return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+        return [];
+    }
+};
+
+const saveOutbox = (queue) => {
+    try {
+        localStorage.setItem(OUTBOX_STORAGE_KEY, JSON.stringify(queue));
+    } catch (e) {}
+};
+
 const ChatProvider = ({ children }) => {
     const { user } = useContext(AuthContext);
 
-    const [conversations, setConversations] = useState([]);
-    const [loading, setLoading] = useState(true);
+    const [conversations, setConversations] = useState(loadCachedConversations);
+    const [loading, setLoading] = useState(() => loadCachedConversations().length === 0);
 
-    const [contacts, setContacts] = useState([]);
+    const [contacts, setContacts] = useState(loadCachedContacts);
     const [contactsLoading, setContactsLoading] = useState(false);
 
     const [messages, setMessages] = useState([]);
     const [selectedConversation, setSelectedConversation] = useState(null);
     const [messagesLoading, setMessagesLoading] = useState(false);
     const [replyingTo, setReplyingTo] = useState(null);
+
+    // Online / Offline tracking
+    const [isOffline, setIsOffline] = useState(() => typeof navigator !== "undefined" ? !navigator.onLine : false);
+    const [justReconnected, setJustReconnected] = useState(false);
 
     // Multi-select messages state
     const [selectedMessageIds, setSelectedMessageIds] = useState([]);
@@ -127,6 +197,39 @@ const ChatProvider = ({ children }) => {
         selectedConversationRef.current = selectedConversation;
     }, [selectedConversation]);
 
+    // Auto-flush offline outbox messages when socket is connected and authenticated
+    const isFlushingRef = useRef(false);
+
+    const flushOutbox = useCallback(async () => {
+        if (isFlushingRef.current) return;
+        if (!socket || !socket.connected || !navigator.onLine) return;
+
+        const queue = loadOutbox();
+        if (!queue || queue.length === 0) return;
+
+        isFlushingRef.current = true;
+        console.log(`[OfflineSync] Flushing ${queue.length} pending messages from outbox...`);
+
+        const remaining = [];
+        for (const item of queue) {
+            try {
+                if (!socket.connected) {
+                    remaining.push(item);
+                    continue;
+                }
+                socket.emit("sendMessage", item.emitPayload);
+                // Tiny delay between emits to preserve message ordering
+                await new Promise((r) => setTimeout(r, 60));
+            } catch (err) {
+                console.error("[OfflineSync] Failed to emit queued message:", err);
+                remaining.push(item);
+            }
+        }
+
+        saveOutbox(remaining);
+        isFlushingRef.current = false;
+    }, []);
+
     useEffect(() => {
         if (!user) {
             if (socket.connected) {
@@ -143,6 +246,7 @@ const ChatProvider = ({ children }) => {
                 "Socket connected:",
                 socket.id
             );
+            flushOutbox();
         };
 
         const handleSocketConnected = (data) => {
@@ -150,6 +254,7 @@ const ChatProvider = ({ children }) => {
                 "Socket authenticated:",
                 data
             );
+            flushOutbox();
         };
 
         const handleConnectError = (error) => {
@@ -188,18 +293,55 @@ const ChatProvider = ({ children }) => {
             const decryptedMessage = await decryptMsgPayload(message, convId);
 
             setMessages((prev) => {
-                // Prevent duplicate message
+                // Prevent duplicate message by real ID
                 const alreadyExists = prev.some(
-                    (item) =>
-                        item._id === decryptedMessage._id
+                    (item) => item._id === decryptedMessage._id
                 );
-
                 if (alreadyExists) {
                     return prev;
                 }
 
-                return [...prev, decryptedMessage];
+                // Check if this replaces a pending optimistic offline message:
+                // 1. By tempId
+                // 2. Or by pending status + matching sender + matching plain text
+                const pendingIdx = prev.findIndex((m) => {
+                    if (!m.isPending && m.status !== "pending") return false;
+                    if (message.tempId && (m.tempId === message.tempId || m._id === message.tempId)) {
+                        return true;
+                    }
+                    const mSender = (m.sender?._id || m.sender)?.toString();
+                    const dSender = (decryptedMessage.sender?._id || decryptedMessage.sender)?.toString();
+                    return mSender === dSender && m.text === decryptedMessage.text;
+                });
+
+                let updated;
+                if (pendingIdx !== -1) {
+                    updated = [...prev];
+                    updated[pendingIdx] = decryptedMessage;
+                } else {
+                    updated = [...prev, decryptedMessage];
+                }
+
+                if (convId) {
+                    saveCachedMessages(convId, updated);
+                }
+                return updated;
             });
+
+            // Clean up outbox queue if matching item is confirmed
+            try {
+                const currentQueue = loadOutbox();
+                if (currentQueue && currentQueue.length > 0) {
+                    const filtered = currentQueue.filter((item) => {
+                        if (message.tempId && item.tempId === message.tempId) return false;
+                        if (item.conversationId === convId && item.plainText === decryptedMessage.text) return false;
+                        return true;
+                    });
+                    if (filtered.length !== currentQueue.length) {
+                        saveOutbox(filtered);
+                    }
+                }
+            } catch (e) {}
 
             // If the message is for the currently open conversation and I am the receiver,
             // immediately mark it as seen
@@ -540,6 +682,43 @@ const ChatProvider = ({ children }) => {
         };
     }, [user]);
 
+    // Network connectivity listener: sync latest data when coming back online
+    useEffect(() => {
+        const handleOnline = async () => {
+            setIsOffline(false);
+            setJustReconnected(true);
+            setTimeout(() => setJustReconnected(false), 3500);
+
+            if (!socket.connected && user) {
+                socket.connect();
+            }
+
+            // Immediately flush any offline pending outbox messages
+            flushOutbox();
+
+            // Sync latest chats & contacts from server
+            getConversations();
+            getContacts();
+
+            // Sync latest messages for the active conversation
+            if (selectedConversationRef.current?._id) {
+                getMessages(selectedConversationRef.current._id);
+            }
+        };
+
+        const handleOffline = () => {
+            setIsOffline(true);
+        };
+
+        window.addEventListener("online", handleOnline);
+        window.addEventListener("offline", handleOffline);
+
+        return () => {
+            window.removeEventListener("online", handleOnline);
+            window.removeEventListener("offline", handleOffline);
+        };
+    }, [user]);
+
     const addContact = async (phone, name) => {
         try {
             const body = { phone };
@@ -566,20 +745,16 @@ const ChatProvider = ({ children }) => {
 
     const getContacts = async () => {
         try {
-            setContactsLoading(true);
+            if (contacts.length === 0) setContactsLoading(true);
 
             const response = await api.get("/contacts");
 
             if (response.data.success) {
                 setContacts(response.data.contacts);
+                saveCachedContacts(response.data.contacts);
             }
         } catch (error) {
-            console.error(
-                "Get contacts error:",
-                error
-            );
-
-            setContacts([]);
+            console.warn("Get contacts error / offline, keeping cached contacts:", error);
         } finally {
             setContactsLoading(false);
         }
@@ -587,7 +762,7 @@ const ChatProvider = ({ children }) => {
 
     const getConversations = async () => {
         try {
-            setLoading(true);
+            if (conversations.length === 0) setLoading(true);
 
             const response = await api.get("/conversations");
 
@@ -606,14 +781,10 @@ const ChatProvider = ({ children }) => {
                     })
                 );
                 setConversations(decryptedConvs);
+                saveCachedConversations(decryptedConvs);
             }
         } catch (error) {
-            console.error(
-                "Get conversations error:",
-                error
-            );
-
-            setConversations([]);
+            console.warn("Get conversations error / offline, keeping cached conversations:", error);
         } finally {
             setLoading(false);
         }
@@ -661,8 +832,18 @@ const ChatProvider = ({ children }) => {
     };
 
     const getMessages = async (conversationId) => {
+        if (!conversationId) return;
+
+        // Immediately load cached messages so the screen displays instantly
+        const cached = loadCachedMessages(conversationId);
+        if (cached && cached.length > 0) {
+            setMessages(cached);
+        }
+
         try {
-            setMessagesLoading(true);
+            if (cached.length === 0) {
+                setMessagesLoading(true);
+            }
 
             const response = await api.get(
                 `/messages/${conversationId}`
@@ -673,15 +854,26 @@ const ChatProvider = ({ children }) => {
                 const decryptedMsgs = await Promise.all(
                     rawMsgs.map((msg) => decryptMsgPayload(msg, conversationId))
                 );
-                setMessages(decryptedMsgs);
+
+                // Preserve any pending optimistic messages that are waiting to be sent
+                setMessages((prev) => {
+                    const pendingMsgs = prev.filter(
+                        (m) =>
+                            (m.isPending || m.status === "pending") &&
+                            !decryptedMsgs.some(
+                                (dm) =>
+                                    dm._id === m._id ||
+                                    (m.tempId && dm.tempId === m.tempId) ||
+                                    (dm.text === m.text && (dm.sender?._id || dm.sender)?.toString() === (m.sender?._id || m.sender)?.toString())
+                            )
+                    );
+                    const combined = [...decryptedMsgs, ...pendingMsgs];
+                    saveCachedMessages(conversationId, combined);
+                    return combined;
+                });
             }
         } catch (error) {
-            console.error(
-                "Get messages error:",
-                error
-            );
-
-            setMessages([]);
+            console.warn("Get messages error / offline, keeping cached messages:", error);
         } finally {
             setMessagesLoading(false);
         }
@@ -697,32 +889,100 @@ const ChatProvider = ({ children }) => {
 
         if (!text && !fileUrl) return;
 
-        if (!socket.connected) {
-            throw new Error("Socket is not connected");
-        }
-
         // Stop typing when sending
         stopTyping();
 
         const replyToId = data.replyTo || replyingTo?._id || null;
+        const tempId = `temp_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+        const isOnlineAndConnected = Boolean(socket && socket.connected && navigator.onLine);
 
-        // End-to-End Encrypt text with conversation AES-GCM key before transmission
-        const encryptedText = text
-            ? await encryptMessage(text, selectedConversation._id)
-            : "";
+        // Optimistic message object for immediate UI presentation
+        const optimisticMsg = {
+            _id: tempId,
+            tempId,
+            conversation: selectedConversation._id,
+            sender: user,
+            receiver: selectedConversation.isGroup ? null : (selectedConversation.user?._id || selectedConversation.user),
+            text, // Plain text for local display
+            fileUrl,
+            fileName: data.fileName || "",
+            fileSize: data.fileSize || 0,
+            duration: data.duration || 0,
+            messageType: data.messageType || (fileUrl ? (fileUrl.startsWith("data:audio") ? "audio" : fileUrl.startsWith("data:image") ? "image" : "file") : "text"),
+            replyTo: replyingTo ? { ...replyingTo } : null,
+            createdAt: new Date().toISOString(),
+            isPending: !isOnlineAndConnected,
+            status: !isOnlineAndConnected ? "pending" : "sent",
+            isDelivered: false,
+            isSeen: false,
+        };
 
-        socket.emit("sendMessage", {
+        // Immediately update current messages state and cache
+        setMessages((prev) => {
+            const updated = [...prev, optimisticMsg];
+            saveCachedMessages(selectedConversation._id, updated);
+            return updated;
+        });
+
+        // Update conversation list sidebar with optimistic preview
+        setConversations((prev) =>
+            prev.map((c) =>
+                c._id === selectedConversation._id
+                    ? {
+                          ...c,
+                          lastMessage: {
+                              _id: tempId,
+                              text,
+                              sender: user._id,
+                              createdAt: optimisticMsg.createdAt,
+                          },
+                          lastMessageAt: optimisticMsg.createdAt,
+                      }
+                    : c
+            )
+        );
+
+        setReplyingTo(null);
+
+        // Encrypt message text
+        let encryptedText = text;
+        try {
+            if (text) {
+                encryptedText = await encryptMessage(text, selectedConversation._id);
+            }
+        } catch (err) {
+            console.error("Encryption error in sendMessage:", err);
+        }
+
+        const emitPayload = {
+            tempId,
             conversationId: selectedConversation._id,
             text: encryptedText,
             fileUrl,
             fileName: data.fileName || "",
             fileSize: data.fileSize || 0,
             duration: data.duration || 0,
-            messageType: data.messageType || (fileUrl ? (fileUrl.startsWith("data:audio") ? "audio" : fileUrl.startsWith("data:image") ? "image" : "file") : "text"),
+            messageType: optimisticMsg.messageType,
             replyTo: replyToId,
-        });
+        };
 
-        setReplyingTo(null);
+        if (!isOnlineAndConnected) {
+            // Queue in localStorage outbox
+            const queue = loadOutbox();
+            queue.push({
+                tempId,
+                conversationId: selectedConversation._id,
+                emitPayload,
+                plainText: text,
+                createdAt: optimisticMsg.createdAt,
+            });
+            saveOutbox(queue);
+            console.log("[OfflineSync] Message saved to offline outbox:", tempId);
+            return;
+        }
+
+        // Online & connected: transmit through socket
+        socket.emit("sendMessage", emitPayload);
     };
 
     const reactToMessage = async (messageId, emoji) => {
@@ -978,6 +1238,13 @@ const ChatProvider = ({ children }) => {
                 convToSet = { ...convToSet, pinnedMessages: decryptedPinned };
             }
             setSelectedConversation(convToSet);
+
+            // Immediately load cached messages for this conversation
+            const cached = loadCachedMessages(conversation._id);
+            if (cached && cached.length > 0) {
+                setMessages(cached);
+            }
+
             await getMessages(conversation._id);
 
             // Mark messages as seen when opening a conversation
@@ -1316,10 +1583,14 @@ const ChatProvider = ({ children }) => {
         // Search Users (Database direct lookup)
         searchUsers,
 
-        // Typing
+        // Typing indicator
         typingUsers,
         startTyping,
         stopTyping,
+
+        // Online / Offline tracking
+        isOffline,
+        justReconnected,
     };
 
 
