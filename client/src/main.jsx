@@ -8,20 +8,23 @@ import AuthProvider from './context/AuthContext.jsx'
 import ChatProvider from './context/ChatContext.jsx'
 import CallProvider from './context/CallContext.jsx'
 import ThemeProvider from './context/ThemeContext.jsx'
+import { PwaProvider } from './context/PwaContext.jsx'
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
-    <AlertProvider>
-      <ThemeProvider>
-        <AuthProvider>
-          <ChatProvider>
-            <CallProvider>
-              <App />
-            </CallProvider>
-          </ChatProvider>
-        </AuthProvider>
-      </ThemeProvider>
-    </AlertProvider>
+    <PwaProvider>
+      <AlertProvider>
+        <ThemeProvider>
+          <AuthProvider>
+            <ChatProvider>
+              <CallProvider>
+                <App />
+              </CallProvider>
+            </ChatProvider>
+          </AuthProvider>
+        </ThemeProvider>
+      </AlertProvider>
+    </PwaProvider>
   </StrictMode>
 )
 

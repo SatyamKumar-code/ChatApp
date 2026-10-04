@@ -232,7 +232,7 @@ export const ContactList = ({ onStartChat, onOpenSettings }) => {
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                         placeholder="Search name or 10-digit phone..."
-                        className="w-full pl-9 pr-8 py-2 rounded-xl bg-[#16162a] border border-white/5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-purple-500/50 focus:bg-[#1a1a32] transition-all"
+                        className="w-full pl-9 pr-8 py-2.5 md:py-2 text-sm md:text-xs rounded-xl bg-[#16162a] border border-white/5 text-white placeholder-zinc-500 focus:outline-none focus:border-purple-500/50 focus:bg-[#1a1a32] transition-all"
                     />
                     {searchQuery && (
                         <button

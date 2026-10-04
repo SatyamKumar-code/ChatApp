@@ -4,6 +4,7 @@ import { ChatContext } from "../../context/ChatContext";
 import { useTheme, THEME_MODES } from "../../context/ThemeContext";
 import Avatar from "../common/Avatar";
 import InviteModal from "../common/InviteModal";
+import { usePwa } from "../../context/PwaContext";
 
 export const ChatList = ({
     onSelectChat,
@@ -25,6 +26,7 @@ export const ChatList = ({
         typingUsers,
         togglePinConversation,
     } = useContext(ChatContext);
+    const { isInstalled, canPromptDirectly, triggerInstall, openInstallModal } = usePwa();
 
     const isGroupsView = activeTab === "groups";
 
@@ -220,6 +222,20 @@ export const ChatList = ({
                     </div>
 
                     <div className="flex items-center gap-1.5">
+                        {/* Mobile PWA Install Button (When not installed) */}
+                        {!isInstalled && (
+                            <button
+                                type="button"
+                                onClick={canPromptDirectly ? triggerInstall : openInstallModal}
+                                className="md:hidden w-8 h-8 rounded-xl bg-purple-600/20 text-purple-300 hover:text-white flex items-center justify-center transition-colors cursor-pointer border border-purple-500/30 shadow-xs"
+                                title="Install App"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                </svg>
+                            </button>
+                        )}
+
                         {/* Mobile Theme Toggle Button */}
                         <button
                             type="button"
@@ -310,7 +326,7 @@ export const ChatList = ({
                                 ? "Search groups..."
                                 : "Search name or 10-digit phone..."
                         }
-                        className="w-full pl-9 pr-8 py-2 rounded-xl bg-[#16162a] border border-white/5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-purple-500/50 focus:bg-[#1a1a32] transition-all"
+                        className="w-full pl-9 pr-8 py-2.5 md:py-2 text-sm md:text-xs rounded-xl bg-[#16162a] border border-white/5 text-white placeholder-zinc-500 focus:outline-none focus:border-purple-500/50 focus:bg-[#1a1a32] transition-all"
                     />
                     {searchQuery && (
                         <button

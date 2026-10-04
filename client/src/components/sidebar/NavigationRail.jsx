@@ -2,6 +2,7 @@ import React, { useContext } from "react";
 import { AuthContext } from "../../context/AuthContext";
 import { useTheme, THEME_MODES } from "../../context/ThemeContext";
 import Avatar from "../common/Avatar";
+import { usePwa } from "../../context/PwaContext";
 
 export const NavigationRail = ({
     activeTab,
@@ -11,6 +12,7 @@ export const NavigationRail = ({
 }) => {
     const { user, logout } = useContext(AuthContext);
     const { themeMode, changeThemeMode, resolvedTheme } = useTheme();
+    const { isInstalled, canPromptDirectly, triggerInstall, openInstallModal, deviceLabel } = usePwa();
 
     return (
         <aside className="hidden md:flex w-16 md:w-20 shrink-0 bg-[#0c0c18] border-r border-white/5 flex-col items-center py-4 justify-between z-20 select-none">
@@ -159,6 +161,33 @@ export const NavigationRail = ({
                         </svg>
                     )}
                 </button>
+
+                {/* Desktop PWA Install Button (Visible when not already running installed) */}
+                {!isInstalled && (
+                    <button
+                        onClick={canPromptDirectly ? triggerInstall : openInstallModal}
+                        title={`Install ChatApp on ${deviceLabel}`}
+                        className="w-10 h-10 rounded-xl flex items-center justify-center text-purple-400 hover:text-purple-300 hover:bg-purple-500/10 transition-all cursor-pointer relative group"
+                    >
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            className="w-5 h-5"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                        >
+                            <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                            />
+                        </svg>
+                        <span className="absolute left-full ml-3 px-2 py-1 bg-slate-900 text-white text-xs rounded-md whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50 shadow-lg border border-purple-500/30">
+                            Install on {deviceLabel}
+                        </span>
+                    </button>
+                )}
 
                 {/* Settings Button */}
                 <button

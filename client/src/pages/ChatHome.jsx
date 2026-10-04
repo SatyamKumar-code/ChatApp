@@ -24,6 +24,7 @@ import PinnedMessageBanner from "../components/chat/PinnedMessageBanner";
 import ForwardModal from "../components/chat/ForwardModal";
 import ChatThemeModal, { CHAT_THEMES } from "../components/chat/ChatThemeModal";
 import { useTheme } from "../context/ThemeContext";
+import { useMobileBackHandler } from "../hooks/useMobileBackHandler";
 
 export const ChatHome = () => {
     const { user } = useContext(AuthContext);
@@ -45,6 +46,8 @@ export const ChatHome = () => {
         toggleBlockUser,
         isUserBlocked,
         blockedUsers,
+        selectedMessageIds,
+        clearSelectedMessages,
     } = useContext(ChatContext);
 
     // Active Navigation Tab: 'chats' | 'contacts'
@@ -60,6 +63,40 @@ export const ChatHome = () => {
     const [isVerifyEncryptionOpen, setIsVerifyEncryptionOpen] = useState(false);
     const [isThemeModalOpen, setIsThemeModalOpen] = useState(false);
     const [forwardingMessage, setForwardingMessage] = useState(null);
+
+    // In-Chat Search state
+    const [isSearching, setIsSearching] = useState(false);
+    const [searchTerm, setSearchTerm] = useState("");
+    const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
+
+    // Mobile PWA Back Navigation Handler (prevents app from closing on mobile back button)
+    const { showExitToast, handleUiBack } = useMobileBackHandler({
+        selectedConversation,
+        selectConversation,
+        isProfilePanelOpen,
+        setIsProfilePanelOpen,
+        isSettingsOpen,
+        setIsSettingsOpen,
+        isAddContactOpen,
+        setIsAddContactOpen,
+        isCreateGroupOpen,
+        setIsCreateGroupOpen,
+        isStarredOpen,
+        setIsStarredOpen,
+        isVerifyEncryptionOpen,
+        setIsVerifyEncryptionOpen,
+        isThemeModalOpen,
+        setIsThemeModalOpen,
+        forwardingMessage,
+        setForwardingMessage,
+        activeTab,
+        setActiveTab,
+        selectedMessageIds,
+        clearSelectedMessages,
+        isSearching,
+        setIsSearching,
+        setSearchTerm,
+    });
 
     // Chat Theme State
     const [currentThemeId, setCurrentThemeId] = useState(() => {
@@ -202,11 +239,6 @@ export const ChatHome = () => {
             alert("Failed to clear chat messages");
         }
     };
-
-    // In-Chat Search state
-    const [isSearching, setIsSearching] = useState(false);
-    const [searchTerm, setSearchTerm] = useState("");
-    const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
 
     // Compute matching messages within active chat
     const matchingMessages = React.useMemo(() => {
@@ -377,7 +409,7 @@ export const ChatHome = () => {
                                 setIsProfilePanelOpen(!isProfilePanelOpen)
                             }
                             isProfileOpen={isProfilePanelOpen}
-                            onBack={() => selectConversation(null)}
+                            onBack={() => handleUiBack(() => selectConversation(null))}
                             isSearching={isSearching}
                             setIsSearching={setIsSearching}
                             searchTerm={searchTerm}
@@ -526,13 +558,13 @@ export const ChatHome = () => {
             {selectedConversation && isProfilePanelOpen && (
                 <>
                     <div
-                        onClick={() => setIsProfilePanelOpen(false)}
+                        onClick={() => handleUiBack(() => setIsProfilePanelOpen(false))}
                         className="md:hidden fixed inset-0 bg-black/60 backdrop-blur-xs z-35 animate-in fade-in duration-200"
                     />
                     <ProfilePanel
                         partner={selectedConversation.user}
                         conversation={selectedConversation}
-                        onClose={() => setIsProfilePanelOpen(false)}
+                        onClose={() => handleUiBack(() => setIsProfilePanelOpen(false))}
                         onOpenVerifyEncryption={() => setIsVerifyEncryptionOpen(true)}
                     />
                 </>
@@ -541,13 +573,13 @@ export const ChatHome = () => {
             {/* 5. Settings Modal (Includes Profile Photo Upload, Appearance, Privacy, Account) */}
             <SettingsModal
                 isOpen={isSettingsOpen}
-                onClose={() => setIsSettingsOpen(false)}
+                onClose={() => handleUiBack(() => setIsSettingsOpen(false))}
             />
 
             {/* 6. Starred Messages Modal */}
             <StarredMessagesModal
                 isOpen={isStarredOpen}
-                onClose={() => setIsStarredOpen(false)}
+                onClose={() => handleUiBack(() => setIsStarredOpen(false))}
                 conversationId={selectedConversation?._id}
                 onJumpToMessage={handleJumpToStarredMessage}
             />
@@ -555,7 +587,7 @@ export const ChatHome = () => {
             {/* 7. Verify End-to-End Encryption Modal */}
             <EncryptionVerifyModal
                 isOpen={isVerifyEncryptionOpen}
-                onClose={() => setIsVerifyEncryptionOpen(false)}
+                onClose={() => handleUiBack(() => setIsVerifyEncryptionOpen(false))}
                 conversation={selectedConversation}
                 partner={selectedConversation?.user}
             />
@@ -563,13 +595,13 @@ export const ChatHome = () => {
             {/* 8. Add Contact Modal */}
             <AddContactModal
                 isOpen={isAddContactOpen}
-                onClose={() => setIsAddContactOpen(false)}
+                onClose={() => handleUiBack(() => setIsAddContactOpen(false))}
             />
 
             {/* 9. Create Group Modal */}
             <CreateGroupModal
                 isOpen={isCreateGroupOpen}
-                onClose={() => setIsCreateGroupOpen(false)}
+                onClose={() => handleUiBack(() => setIsCreateGroupOpen(false))}
             />
 
             {/* 10. WebRTC Audio & Video Calling Overlays */}
@@ -580,13 +612,13 @@ export const ChatHome = () => {
             <ForwardModal
                 isOpen={Boolean(forwardingMessage)}
                 message={forwardingMessage}
-                onClose={() => setForwardingMessage(null)}
+                onClose={() => handleUiBack(() => setForwardingMessage(null))}
             />
 
             {/* 12. Chat Theme / Wallpaper Modal */}
             <ChatThemeModal
                 isOpen={isThemeModalOpen}
-                onClose={() => setIsThemeModalOpen(false)}
+                onClose={() => handleUiBack(() => setIsThemeModalOpen(false))}
                 currentThemeId={currentThemeId}
                 onSelectTheme={handleSelectTheme}
                 customWallpaper={customWallpaper}
@@ -594,6 +626,16 @@ export const ChatHome = () => {
                 wallpaperOpacity={wallpaperOpacity}
                 onSetWallpaperOpacity={handleSetWallpaperOpacity}
             />
+
+            {/* Native Mobile PWA Exit Warning Toast (Prevents accidental app close) */}
+            {showExitToast && (
+                <div className="fixed bottom-20 inset-x-0 mx-auto w-fit z-50 px-4 py-2 rounded-full bg-slate-900/95 border border-purple-500/40 text-white text-xs font-medium shadow-2xl backdrop-blur-md animate-[fadeInUp_0.2s_ease-out] flex items-center gap-2 pointer-events-none">
+                    <svg className="w-4 h-4 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                    </svg>
+                    Press back again to exit
+                </div>
+            )}
 
             {/* 12. Mobile Bottom Navigation Bar (Visible only on mobile when list is active) */}
             {!selectedConversation && (

@@ -598,29 +598,6 @@ export const ChatHeader = ({
                 <>
                     {/* Left: Avatar & Info */}
                     <div className="flex items-center gap-3 min-w-0">
-                        {/* Mobile Back Button */}
-                        {onBack && (
-                            <button
-                                onClick={onBack}
-                                className="md:hidden w-8 h-8 rounded-lg flex items-center justify-center text-zinc-400 hover:text-white hover:bg-white/5 -ml-1 mr-1 cursor-pointer"
-                            >
-                                <svg
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    className="w-5 h-5"
-                                    fill="none"
-                                    viewBox="0 0 24 24"
-                                    stroke="currentColor"
-                                >
-                                    <path
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        strokeWidth={2}
-                                        d="M15 19l-7-7 7-7"
-                                    />
-                                </svg>
-                            </button>
-                        )}
-
                         <div
                             onClick={onToggleProfile}
                             className="cursor-pointer transition-transform hover:opacity-90"

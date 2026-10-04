@@ -2,12 +2,15 @@
   "name": "ChatApp - Messenger",
   "short_name": "ChatApp",
   "description": "Secure real-time chat application with end-to-end encryption and full offline mode",
-  "start_url": "/",
+  "id": "/?source=pwa",
+  "start_url": "/?source=pwa",
   "scope": "/",
   "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
   "orientation": "any",
   "background_color": "#0c0c18",
   "theme_color": "#0c0c18",
+  "prefer_related_applications": false,
   "categories": ["social", "communication", "chat"],
   "icons": [
     {

@@ -6,7 +6,8 @@ import ProtectedRoute from "./components/ProtectedRoute";
 import PublicRoute from "./components/PublicRoute";
 import ChatHome from "./pages/ChatHome";
 import OfflineStatusIndicator from "./components/common/OfflineStatusIndicator";
-import MobileAppDownloadBanner from "./components/common/MobileAppDownloadBanner";
+import PwaInstallBanner from "./components/common/PwaInstallBanner";
+import PwaInstallModal from "./components/common/PwaInstallModal";
 
 function App() {
   return (
@@ -14,8 +15,11 @@ function App() {
       {/* Visual Offline Mode & Reconnection Indicator */}
       <OfflineStatusIndicator />
 
-      {/* Mobile Download/Install Banner: Strictly visible only on Android & iOS mobile, hidden on Desktop */}
-      <MobileAppDownloadBanner />
+      {/* Universal PWA Download & Install Banner (PC & Mobile) */}
+      <PwaInstallBanner />
+
+      {/* Interactive PWA Step-by-Step Installation Modal */}
+      <PwaInstallModal />
 
       <Routes>
         {/* Guest-only routes: If already logged in, redirect to "/" */}
