@@ -33,16 +33,11 @@ export const Avatar = ({
     src = "",
     name = "",
     size = 44,
-    isOnline = undefined,
     className = "",
-    showStatus = true,
     onClick,
 }) => {
     const [imageError, setImageError] = useState(false);
     const hasImage = Boolean(src && !imageError);
-
-    // Online indicator dot size
-    const dotSize = Math.max(9, Math.round(size * 0.24));
 
     return (
         <div
@@ -68,23 +63,6 @@ export const Avatar = ({
                 >
                     {getInitials(name)}
                 </div>
-            )}
-
-            {/* Online / Offline status badge */}
-            {showStatus && isOnline !== undefined && (
-                <span
-                    className={`absolute bottom-0 right-0 rounded-full ring-2 ring-[#0a0a14] ${
-                        isOnline ? "bg-emerald-500" : "bg-zinc-500"
-                    }`}
-                    style={{
-                        width: `${dotSize}px`,
-                        height: `${dotSize}px`,
-                    }}
-                >
-                    {isOnline && (
-                        <span className="absolute inset-0 rounded-full bg-emerald-400 animate-ping opacity-75" />
-                    )}
-                </span>
             )}
         </div>
     );

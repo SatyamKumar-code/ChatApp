@@ -35,6 +35,9 @@ export const MessageBubble = ({
     searchHighlight = "",
 }) => {
     const { selectedMessageIds, toggleSelectMessage, selectedConversation, messages } = useContext(ChatContext) || {};
+    const myId = (currentUserId?._id || currentUserId)?.toString();
+    const senderId = (message?.sender?._id || message?.sender)?.toString();
+    const isMe = typeof isMyMessage === "boolean" ? isMyMessage : Boolean(myId && senderId && myId === senderId);
     const isSelectionMode = Boolean(selectedMessageIds && selectedMessageIds.length > 0);
     const isSelected = Boolean(selectedMessageIds && selectedMessageIds.includes(message._id));
 
@@ -393,15 +396,20 @@ export const MessageBubble = ({
                     {/* Bottom Time & Ticks */}
                     <div className="flex items-center justify-end gap-1 mt-2 pt-1 border-t border-white/5 text-[10px] text-zinc-400">
                         <span>{formatTime(message.createdAt)}</span>
-                        {isMyMessage && (
+                        {isMe && (
                             <span
                                 className={
-                                    message.isSeen
-                                        ? "text-cyan-400 font-bold"
+                                    (message.isSeen || message.seen)
+                                        ? "tick-seen text-emerald-400 font-bold"
                                         : "text-zinc-500"
                                 }
+                                style={
+                                    (message.isSeen || message.seen)
+                                        ? { color: "#34d399" }
+                                        : undefined
+                                }
                             >
-                                {message.isSeen ? "✓✓" : message.isDelivered ? "✓✓" : "✓"}
+                                {(message.isSeen || message.seen) ? "✓✓" : (message.isDelivered || message.delivered) ? "✓✓" : "✓"}
                             </span>
                         )}
                     </div>
@@ -866,21 +874,26 @@ export const MessageBubble = ({
                             <span>{formatTime(message.createdAt)}</span>
 
                             {/* Status Ticks for Sent Messages */}
-                            {isMyMessage && (
+                            {isMe && (
                                 <span
                                     className={`inline-flex items-center font-mono text-xs tracking-tighter ${
                                         message.isPending || message.status === "pending"
                                             ? "text-zinc-300 opacity-80"
-                                            : message.isSeen
-                                            ? "text-sky-300 font-bold"
+                                            : (message.isSeen || message.seen)
+                                            ? "tick-seen text-emerald-400 font-bold"
                                             : "text-purple-200/80"
                                     }`}
+                                    style={
+                                        !(message.isPending || message.status === "pending") && (message.isSeen || message.seen)
+                                            ? { color: "#34d399" }
+                                            : undefined
+                                    }
                                     title={
                                         message.isPending || message.status === "pending"
                                             ? "Waiting to send (offline)"
-                                            : message.isSeen
+                                            : (message.isSeen || message.seen)
                                             ? "Read"
-                                            : message.isDelivered
+                                            : (message.isDelivered || message.delivered)
                                             ? "Delivered"
                                             : "Sent"
                                     }
@@ -897,9 +910,9 @@ export const MessageBubble = ({
                                             <circle cx="12" cy="12" r="9" />
                                             <polyline points="12 7 12 12 15 15" />
                                         </svg>
-                                    ) : message.isSeen ? (
+                                    ) : (message.isSeen || message.seen) ? (
                                         "✓✓"
-                                    ) : message.isDelivered ? (
+                                    ) : (message.isDelivered || message.delivered) ? (
                                         "✓✓"
                                     ) : (
                                         "✓"

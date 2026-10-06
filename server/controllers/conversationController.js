@@ -1,6 +1,7 @@
 import Conversation from "../models/Conversation.js";
 import User from "../models/User.js";
 import Message from "../models/Message.js";
+import { isUserOnline } from "../socket/socketServer.js";
 
 // Helper to create and broadcast system audit messages in group chats
 const createAndBroadcastSystemMessage = async (conversationId, senderId, text, io, participants) => {
@@ -130,13 +131,14 @@ const formatConversationForClient = (conversation, currentUserId) => {
                 )
             );
 
+            const activeOnline = !isBlockedByOther && isUserOnline(otherUser._id);
             userObj = {
                 _id: otherUser._id,
                 name: otherUser.name,
                 phone: otherUser.phone,
                 profilePicture: isBlockedByOther ? "" : (otherUser.profilePicture || ""),
                 about: isBlockedByOther ? "" : (otherUser.about || ""),
-                isOnline: isBlockedByOther ? false : Boolean(otherUser.isOnline),
+                isOnline: Boolean(activeOnline),
                 lastSeen: isBlockedByOther ? null : otherUser.lastSeen,
                 isBlockedByOther,
             };

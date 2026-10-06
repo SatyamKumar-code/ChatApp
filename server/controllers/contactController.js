@@ -1,5 +1,6 @@
 import Contact from "../models/Contact.js";
 import User from "../models/User.js";
+import { isUserOnline } from "../socket/socketServer.js";
 
 const getContacts = async (req, res) => {
     try {
@@ -25,13 +26,14 @@ const getContacts = async (req, res) => {
                     )
                 );
                 const isBlockedByMe = myBlocked.includes(cUser._id.toString());
+                const activeOnline = !isBlockedByOther && isUserOnline(cUser._id);
 
                 formattedUser = {
                     _id: cUser._id,
                     name: cUser.name,
                     phone: cUser.phone,
                     profilePicture: isBlockedByOther ? "" : (cUser.profilePicture || ""),
-                    isOnline: isBlockedByOther ? false : Boolean(cUser.isOnline),
+                    isOnline: Boolean(activeOnline),
                     lastSeen: isBlockedByOther ? null : cUser.lastSeen,
                     isBlockedByOther,
                     isBlocked: isBlockedByMe,
@@ -144,12 +146,13 @@ const addContact = async (req, res) => {
                 )
             );
 
+            const activeOnline = !isBlockedByOther && isUserOnline(cUser._id);
             formattedUser = {
                 _id: cUser._id,
                 name: cUser.name,
                 phone: cUser.phone,
                 profilePicture: isBlockedByOther ? "" : (cUser.profilePicture || ""),
-                isOnline: isBlockedByOther ? false : Boolean(cUser.isOnline),
+                isOnline: Boolean(activeOnline),
                 lastSeen: isBlockedByOther ? null : cUser.lastSeen,
                 isBlockedByOther,
             };

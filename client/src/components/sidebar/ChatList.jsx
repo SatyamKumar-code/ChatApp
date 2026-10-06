@@ -423,7 +423,9 @@ export const ChatList = ({
                             const isSelected = selectedConversation?._id === conv._id;
                             const isTyping = typingUsers[conv._id];
                             const lastMsg = conv.lastMessage;
-                            const isMyMessage = lastMsg?.sender === user?._id;
+                            const myId = (user?._id || user?.id)?.toString();
+                            const senderId = (lastMsg?.sender?._id || lastMsg?.sender)?.toString();
+                            const isMyMessage = Boolean(myId && senderId && myId === senderId);
 
                             return (
                                 <div
@@ -538,7 +540,7 @@ export const ChatList = ({
                                                         <span
                                                             className={`font-mono text-xs ${
                                                                 lastMsg?.isSeen
-                                                                    ? "text-blue-400 font-bold"
+                                                                    ? "text-emerald-400 font-bold"
                                                                     : "text-zinc-400"
                                                             }`}
                                                         >

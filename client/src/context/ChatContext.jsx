@@ -242,19 +242,21 @@ const ChatProvider = ({ children }) => {
         socket.connect();
 
         const handleConnect = () => {
-            console.log(
-                "Socket connected:",
-                socket.id
-            );
             flushOutbox();
+            if (selectedConversationRef.current?._id) {
+                socket.emit("message:markSeen", {
+                    conversationId: selectedConversationRef.current._id.toString(),
+                });
+            }
         };
 
         const handleSocketConnected = (data) => {
-            console.log(
-                "Socket authenticated:",
-                data
-            );
             flushOutbox();
+            if (selectedConversationRef.current?._id) {
+                socket.emit("message:markSeen", {
+                    conversationId: selectedConversationRef.current._id.toString(),
+                });
+            }
         };
 
         const handleConnectError = (error) => {
@@ -289,44 +291,104 @@ const ChatProvider = ({ children }) => {
                 return;
             }
 
-            const convId = message.conversation?._id || message.conversation;
+            const convId = (message.conversation?._id || message.conversation)?.toString();
             const decryptedMessage = await decryptMsgPayload(message, convId);
 
-            setMessages((prev) => {
-                // Prevent duplicate message by real ID
-                const alreadyExists = prev.some(
-                    (item) => item._id === decryptedMessage._id
-                );
-                if (alreadyExists) {
-                    return prev;
-                }
+            const activeConvId = (selectedConversationRef.current?._id)?.toString();
+            const isForActiveConversation = Boolean(activeConvId && convId && activeConvId === convId);
 
-                // Check if this replaces a pending optimistic offline message:
-                // 1. By tempId
-                // 2. Or by pending status + matching sender + matching plain text
-                const pendingIdx = prev.findIndex((m) => {
-                    if (!m.isPending && m.status !== "pending") return false;
-                    if (message.tempId && (m.tempId === message.tempId || m._id === message.tempId)) {
-                        return true;
+            if (isForActiveConversation) {
+                setMessages((prev) => {
+                    const tempIdToMatch = message.tempId || decryptedMessage.tempId;
+
+                    // 1. Check if real ID is already in list
+                    const realExistsIndex = prev.findIndex(
+                        (item) => item._id?.toString() === decryptedMessage._id?.toString()
+                    );
+
+                    // 2. Find matching optimistic message to replace:
+                    // Match by tempId, or by temp_ prefix with same sender & content
+                    const optimisticIndex = prev.findIndex((m) => {
+                        if (tempIdToMatch && (m.tempId === tempIdToMatch || m._id === tempIdToMatch)) {
+                            return true;
+                        }
+                        if (typeof m._id === "string" && (m._id.startsWith("temp_") || m.tempId)) {
+                            const mSender = (m.sender?._id || m.sender)?.toString();
+                            const dSender = (decryptedMessage.sender?._id || decryptedMessage.sender)?.toString();
+                            if (mSender && dSender && mSender === dSender) {
+                                if (m.text && decryptedMessage.text && m.text.trim() === decryptedMessage.text.trim()) {
+                                    return true;
+                                }
+                                if (m.fileUrl && decryptedMessage.fileUrl && m.fileUrl === decryptedMessage.fileUrl) {
+                                    return true;
+                                }
+                            }
+                        }
+                        return false;
+                    });
+
+                    let updated;
+                    if (realExistsIndex !== -1) {
+                        // Real message already exists: keep it updated and remove any leftover optimistic item
+                        updated = prev.map((m, idx) => (idx === realExistsIndex ? decryptedMessage : m));
+                        if (optimisticIndex !== -1 && optimisticIndex !== realExistsIndex) {
+                            updated = updated.filter((_, idx) => idx !== optimisticIndex);
+                        }
+                    } else if (optimisticIndex !== -1) {
+                        // Replace the optimistic message in-place with the server-confirmed message
+                        updated = [...prev];
+                        updated[optimisticIndex] = decryptedMessage;
+                    } else {
+                        // New incoming message from partner: append
+                        updated = [...prev, decryptedMessage];
                     }
-                    const mSender = (m.sender?._id || m.sender)?.toString();
-                    const dSender = (decryptedMessage.sender?._id || decryptedMessage.sender)?.toString();
-                    return mSender === dSender && m.text === decryptedMessage.text;
+
+                    // Extra deduplication safeguard: purge any duplicate entries matching tempId or real ID
+                    if (tempIdToMatch) {
+                        updated = updated.filter(
+                            (m) =>
+                                m._id?.toString() === decryptedMessage._id?.toString() ||
+                                (m._id !== tempIdToMatch && m.tempId !== tempIdToMatch)
+                        );
+                    }
+
+                    if (convId) {
+                        saveCachedMessages(convId, updated);
+                    }
+                    return updated;
                 });
+            } else if (convId) {
+                // Background conversation message: update cached messages
+                try {
+                    const cached = loadCachedMessages(convId);
+                    if (cached && cached.length > 0) {
+                        const tempIdToMatch = message.tempId || decryptedMessage.tempId;
+                        const filtered = cached.filter(
+                            (m) =>
+                                m._id?.toString() !== decryptedMessage._id?.toString() &&
+                                (!tempIdToMatch || (m._id !== tempIdToMatch && m.tempId !== tempIdToMatch))
+                        );
+                        saveCachedMessages(convId, [...filtered, decryptedMessage]);
+                    }
+                } catch (e) {}
+            }
 
-                let updated;
-                if (pendingIdx !== -1) {
-                    updated = [...prev];
-                    updated[pendingIdx] = decryptedMessage;
-                } else {
-                    updated = [...prev, decryptedMessage];
-                }
-
-                if (convId) {
-                    saveCachedMessages(convId, updated);
-                }
-                return updated;
-            });
+            // Immediately update sidebar conversation preview with confirmed message
+            if (convId) {
+                setConversations((prev) =>
+                    prev.map((c) => {
+                        const cId = (c._id?.toString() || c._id);
+                        if (cId === convId) {
+                            return {
+                                ...c,
+                                lastMessage: decryptedMessage,
+                                lastMessageAt: decryptedMessage.createdAt,
+                            };
+                        }
+                        return c;
+                    })
+                );
+            }
 
             // Clean up outbox queue if matching item is confirmed
             try {
@@ -343,16 +405,23 @@ const ChatProvider = ({ children }) => {
                 }
             } catch (e) {}
 
-            // If the message is for the currently open conversation and I am the receiver,
+            // If the message is for the currently open conversation and I did not send it,
             // immediately mark it as seen
             const currentConv = selectedConversationRef.current;
+            const msgConvId = (message.conversation?._id || message.conversation)?.toString();
+            const currentConvId = currentConv?._id?.toString();
+            const myId = (user?._id || user?.id)?.toString();
+            const msgSenderId = (message.sender?._id || message.sender)?.toString();
+
             if (
-                currentConv &&
-                message.conversation === currentConv._id &&
-                message.receiver?._id === user._id
+                currentConvId &&
+                msgConvId &&
+                currentConvId === msgConvId &&
+                msgSenderId &&
+                msgSenderId !== myId
             ) {
                 socket.emit("message:markSeen", {
-                    conversationId: currentConv._id,
+                    conversationId: currentConvId,
                 });
             }
 
@@ -360,7 +429,7 @@ const ChatProvider = ({ children }) => {
             getConversations();
 
             // Play sound chime if message was sent by someone else
-            if (message.sender?._id !== user?._id && message.sender !== user?._id) {
+            if (msgSenderId && msgSenderId !== myId) {
                 playMessageSound();
             }
         };
@@ -373,17 +442,26 @@ const ChatProvider = ({ children }) => {
 
             if (!deliveredMsgs || deliveredMsgs.length === 0) return;
 
-            setMessages((prev) =>
-                prev.map((msg) => {
-                    const delivered = deliveredMsgs.find(
-                        (d) => d.messageId === msg._id
-                    );
-                    if (delivered) {
+            const deliveredSet = new Set(
+                deliveredMsgs.map((d) => (d.messageId?.toString() || d.toString()))
+            );
+
+            setMessages((prev) => {
+                const updated = prev.map((msg) => {
+                    const idStr = (msg._id?.toString() || msg._id);
+                    const tempIdStr = msg.tempId?.toString();
+                    if (deliveredSet.has(idStr) || (tempIdStr && deliveredSet.has(tempIdStr))) {
                         return { ...msg, isDelivered: true };
                     }
                     return msg;
-                })
-            );
+                });
+
+                const activeConvId = selectedConversationRef.current?._id?.toString();
+                if (activeConvId) {
+                    saveCachedMessages(activeConvId, updated);
+                }
+                return updated;
+            });
 
             // Update conversation list to reflect delivered status
             getConversations();
@@ -393,30 +471,73 @@ const ChatProvider = ({ children }) => {
         // SEEN STATUS HANDLER
         // ==============================
         const handleMessageSeen = (data) => {
+            if (!data) return;
             const {
                 conversationId,
                 messages: seenMsgs,
                 seenAt,
             } = data;
 
-            if (!seenMsgs || seenMsgs.length === 0) return;
+            const convIdStr = (conversationId?._id || conversationId)?.toString();
+            const myId = (user?._id || user?.id)?.toString();
 
-            setMessages((prev) =>
-                prev.map((msg) => {
-                    const seen = seenMsgs.find(
-                        (s) => s.messageId === msg._id
-                    );
-                    if (seen) {
+            const seenSet = new Set(
+                (seenMsgs || [])
+                    .map((s) => (s?.messageId?.toString() || s?._id?.toString() || s?.toString()))
+                    .filter(Boolean)
+            );
+
+            setMessages((prev) => {
+                const activeConvId = selectedConversationRef.current?._id?.toString();
+                const isForCurrentConv = Boolean(activeConvId && convIdStr && activeConvId === convIdStr);
+
+                const updated = prev.map((msg) => {
+                    const idStr = (msg._id?.toString() || msg._id);
+                    const tempIdStr = msg.tempId?.toString();
+                    const msgConvId = (msg.conversation?._id || msg.conversation)?.toString();
+                    const msgSenderId = (msg.sender?._id || msg.sender)?.toString();
+
+                    const isSentByMe = Boolean(myId && msgSenderId && myId === msgSenderId);
+                    const isMatchedById = Boolean((idStr && seenSet.has(idStr)) || (tempIdStr && seenSet.has(tempIdStr)));
+                    const isMatchedByConv = Boolean(isSentByMe && (isForCurrentConv || (convIdStr && msgConvId === convIdStr)));
+
+                    if (isMatchedById || isMatchedByConv) {
                         return {
                             ...msg,
                             isSeen: true,
                             isDelivered: true,
-                            seenAt,
+                            seenAt: seenAt || msg.seenAt || new Date().toISOString(),
                         };
                     }
                     return msg;
-                })
-            );
+                });
+
+                if (activeConvId) {
+                    saveCachedMessages(activeConvId, updated);
+                }
+                return updated;
+            });
+
+            // Immediately update sidebar conversation list
+            if (convIdStr) {
+                setConversations((prev) =>
+                    prev.map((c) => {
+                        if (c._id?.toString() === convIdStr) {
+                            if (c.lastMessage) {
+                                return {
+                                    ...c,
+                                    lastMessage: {
+                                        ...c.lastMessage,
+                                        isSeen: true,
+                                        isDelivered: true,
+                                    },
+                                };
+                            }
+                        }
+                        return c;
+                    })
+                );
+            }
 
             // Update conversation list
             getConversations();
@@ -682,6 +803,80 @@ const ChatProvider = ({ children }) => {
         };
     }, [user]);
 
+    // Full PWA, Mobile, and Cross-Browser Presence Sync (WhatsApp-Style)
+    useEffect(() => {
+        if (!user) return;
+
+        let hideTimer = null;
+
+        const markOffline = () => {
+            try {
+                if (socket && socket.connected) {
+                    socket.emit("user:going_offline");
+                    socket.disconnect();
+                }
+
+                const serverUrl = import.meta.env.VITE_SERVER_URL;
+                if (serverUrl && user?._id) {
+                    const payload = JSON.stringify({ userId: user._id });
+
+                    // 1. Try navigator.sendBeacon (native browser OS background worker)
+                    if (navigator.sendBeacon) {
+                        const blob = new Blob([payload], { type: "application/json" });
+                        navigator.sendBeacon(`${serverUrl}/api/auth/offline`, blob);
+                    }
+
+                    // 2. Also send keepalive fetch with credentials
+                    fetch(`${serverUrl}/api/auth/offline`, {
+                        method: "POST",
+                        credentials: "include",
+                        keepalive: true,
+                        headers: { "Content-Type": "application/json" },
+                        body: payload,
+                    }).catch(() => {});
+                }
+            } catch (e) {}
+        };
+
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === "hidden") {
+                // If user minimized PWA, locked screen, or switched app, mark offline after 2 seconds
+                hideTimer = setTimeout(() => {
+                    markOffline();
+                }, 2000);
+            } else if (document.visibilityState === "visible") {
+                if (hideTimer) {
+                    clearTimeout(hideTimer);
+                    hideTimer = null;
+                }
+                // When coming back into the PWA/tab, reconnect immediately
+                if (!socket.connected && user) {
+                    socket.connect();
+                } else if (socket.connected && selectedConversationRef.current?._id) {
+                    socket.emit("message:markSeen", {
+                        conversationId: selectedConversationRef.current._id.toString(),
+                    });
+                }
+            }
+        };
+
+        const handleImmediateUnload = () => {
+            if (hideTimer) clearTimeout(hideTimer);
+            markOffline();
+        };
+
+        window.addEventListener("beforeunload", handleImmediateUnload);
+        window.addEventListener("pagehide", handleImmediateUnload);
+        document.addEventListener("visibilitychange", handleVisibilityChange);
+
+        return () => {
+            if (hideTimer) clearTimeout(hideTimer);
+            window.removeEventListener("beforeunload", handleImmediateUnload);
+            window.removeEventListener("pagehide", handleImmediateUnload);
+            document.removeEventListener("visibilitychange", handleVisibilityChange);
+        };
+    }, [user]);
+
     // Network connectivity listener: sync latest data when coming back online
     useEffect(() => {
         const handleOnline = async () => {
@@ -871,6 +1066,12 @@ const ChatProvider = ({ children }) => {
                     saveCachedMessages(conversationId, combined);
                     return combined;
                 });
+
+                if (socket.connected) {
+                    socket.emit("message:markSeen", {
+                        conversationId: conversationId.toString(),
+                    });
+                }
             }
         } catch (error) {
             console.warn("Get messages error / offline, keeping cached messages:", error);
@@ -1250,7 +1451,7 @@ const ChatProvider = ({ children }) => {
             // Mark messages as seen when opening a conversation
             if (socket.connected) {
                 socket.emit("message:markSeen", {
-                    conversationId: conversation._id,
+                    conversationId: (conversation._id?.toString() || conversation._id),
                 });
             }
         } else {

@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import UserModel from '../models/User.js';
 import { generateAccessToken, generateRefreshToken } from '../utils/generateToken.js';
+import { isUserOnline } from '../socket/socketServer.js';
 
 
 const isProduction =
@@ -427,13 +428,14 @@ const searchUsers = async (req, res) => {
                 )
             );
 
+            const activeOnline = !isBlockedByOther && isUserOnline(u._id);
             return {
                 _id: u._id,
                 name: u.name,
                 phone: u.phone,
                 profilePicture: isBlockedByOther ? "" : (u.profilePicture || ""),
                 about: isBlockedByOther ? "" : (u.about || ""),
-                isOnline: isBlockedByOther ? false : Boolean(u.isOnline),
+                isOnline: Boolean(activeOnline),
                 lastSeen: isBlockedByOther ? null : u.lastSeen,
                 isBlockedByOther,
             };
@@ -530,6 +532,35 @@ const getBlockedUsers = async (req, res) => {
     }
 };
 
+const setOffline = async (req, res) => {
+    try {
+        const userId = (req.user?._id || req.body?.userId)?.toString();
+        if (userId) {
+            const lastSeen = new Date();
+            await UserModel.findByIdAndUpdate(userId, {
+                isOnline: false,
+                lastSeen,
+            });
+
+            const { onlineUsers } = await import("../socket/socketServer.js");
+            if (onlineUsers) {
+                onlineUsers.delete(userId);
+            }
+
+            const io = req.app.get("io");
+            if (io) {
+                io.emit("user:offline", {
+                    userId,
+                    lastSeen,
+                });
+            }
+        }
+        res.status(200).json({ success: true });
+    } catch (e) {
+        res.status(200).json({ success: false });
+    }
+};
+
 export {
     registerUser,
     loginUser,
@@ -539,4 +570,5 @@ export {
     searchUsers,
     toggleBlockUser,
     getBlockedUsers,
+    setOffline,
 };

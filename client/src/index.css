@@ -407,12 +407,33 @@ html.light .text-zinc-500 {
   color: #334155 !important;
 }
 
-/* Outgoing Chat Bubbles & Previews - always crisp white text in both dark & light modes */
-.chat-bubble-outgoing,
-.chat-bubble-outgoing *,
-html.light .chat-bubble-outgoing,
-html.light .chat-bubble-outgoing * {
-  color: #ffffff !important;
+/* Outgoing Chat Bubbles & Previews */
+.chat-bubble-outgoing {
+  color: #ffffff;
+}
+
+/* Explicit tick & accent styles that MUST NEVER be overridden by white */
+.tick-seen,
+.chat-bubble-outgoing .tick-seen,
+html.light .chat-bubble-outgoing .tick-seen,
+.chat-bubble-outgoing [class*="text-emerald"],
+html.light .chat-bubble-outgoing [class*="text-emerald"] {
+  color: #34d399 !important; /* emerald-400 green */
+}
+
+.chat-bubble-outgoing [class*="text-amber"],
+html.light .chat-bubble-outgoing [class*="text-amber"] {
+  color: #fbbf24 !important;
+}
+
+.chat-bubble-outgoing [class*="text-purple-200"],
+html.light .chat-bubble-outgoing [class*="text-purple-200"] {
+  color: rgba(233, 213, 255, 0.8) !important;
+}
+
+.chat-bubble-outgoing [class*="text-zinc-300"],
+html.light .chat-bubble-outgoing [class*="text-zinc-300"] {
+  color: #d4d4d8 !important;
 }
 
 /* Standalone .text-white on non-colored elements should be black */

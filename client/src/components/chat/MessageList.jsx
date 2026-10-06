@@ -22,12 +22,36 @@ export const MessageList = ({
     } = useContext(ChatContext);
     const messagesEndRef = useRef(null);
 
+    // Defensive deduplication by _id and tempId to guarantee no duplicate bubbles are rendered
+    const displayMessages = React.useMemo(() => {
+        if (!messages || messages.length === 0) return [];
+        const seenIds = new Set();
+        const seenTempIds = new Set();
+        const result = [];
+
+        // Traverse in reverse order so real confirmed messages take precedence over temporary items
+        for (let i = messages.length - 1; i >= 0; i--) {
+            const m = messages[i];
+            const id = m._id?.toString();
+            const tempId = m.tempId?.toString();
+
+            if (id && seenIds.has(id)) continue;
+            if (tempId && seenTempIds.has(tempId)) continue;
+            if (id && seenTempIds.has(id)) continue;
+
+            if (id) seenIds.add(id);
+            if (tempId) seenTempIds.add(tempId);
+            result.unshift(m);
+        }
+        return result;
+    }, [messages]);
+
     // Auto-scroll to bottom on new message if not searching
     useEffect(() => {
         if (!searchTerm) {
             messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
         }
-    }, [messages, typingText, searchTerm]);
+    }, [displayMessages, typingText, searchTerm]);
 
     // Format date headers (e.g. Today, Yesterday, Date)
     const getDateHeader = (dateStr) => {
@@ -57,7 +81,7 @@ export const MessageList = ({
                     <div className="w-6 h-6 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
                     Loading messages...
                 </div>
-            ) : messages.length === 0 ? (
+            ) : displayMessages.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center gap-3 text-center py-12">
                     <div className="w-14 h-14 rounded-2xl bg-purple-600/10 border border-purple-500/20 flex items-center justify-center text-purple-400">
                         <svg
@@ -113,9 +137,11 @@ export const MessageList = ({
                         </div>
                     </div>
 
-                    {messages.map((message, index) => {
-                    const isMyMessage = message.sender?._id === user?._id;
-                    const prevMessage = messages[index - 1];
+                    {displayMessages.map((message, index) => {
+                    const myId = (user?._id || user?.id)?.toString();
+                    const senderId = (message.sender?._id || message.sender)?.toString();
+                    const isMyMessage = Boolean(myId && senderId && myId === senderId);
+                    const prevMessage = displayMessages[index - 1];
 
                     // Check if date changed
                     const currentDate = new Date(message.createdAt).toDateString();
@@ -145,7 +171,7 @@ export const MessageList = ({
                                         message={message}
                                         isMyMessage={isMyMessage}
                                         isGroup={Boolean(selectedConversation?.isGroup)}
-                                        currentUserId={user?._id}
+                                        currentUserId={myId}
                                         onReply={setReplyingTo}
                                         onForward={onForward}
                                         onReact={reactToMessage}

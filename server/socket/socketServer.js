@@ -32,15 +32,38 @@ const parseCookies = (cookieHeader) => {
   return cookies;
 };
 
+let ioInstance = null;
+
 /**
  * Check if a user has any active socket connections
  */
 const isUserOnline = (userId) => {
-  const sockets = onlineUsers.get(userId);
-  return sockets && sockets.size > 0;
+  if (!userId) return false;
+  const idStr = (userId._id || userId).toString();
+  const sockets = onlineUsers.get(idStr);
+  if (!sockets || sockets.size === 0) return false;
+
+  if (ioInstance && ioInstance.sockets?.sockets) {
+    let hasAlive = false;
+    for (const sId of Array.from(sockets)) {
+      if (ioInstance.sockets.sockets.has(sId)) {
+        hasAlive = true;
+      } else {
+        sockets.delete(sId);
+      }
+    }
+    if (!hasAlive) {
+      onlineUsers.delete(idStr);
+      return false;
+    }
+    return true;
+  }
+
+  return sockets.size > 0;
 };
 
 const setupSocket = (io) => {
+  ioInstance = io;
   // ==============================
   // SOCKET AUTHENTICATION
   // ==============================
@@ -103,9 +126,11 @@ const setupSocket = (io) => {
   io.on("connection", async (socket) => {
     const userId = socket.user._id.toString();
 
-    console.log(
-      `Socket connected: ${socket.user.name} (${userId}) [${socket.id}]`
-    );
+    if(process.env.NODE_ENV !== "production"){
+      console.log(
+        `Socket connected: ${socket.user.name} (${userId}) [${socket.id}]`
+      );
+    }
 
     // Join personal user room
     socket.join(`user:${userId}`);
@@ -566,54 +591,57 @@ const setupSocket = (io) => {
 
         if (!conversationId) return;
 
-        // Find all unseen messages in this conversation sent TO current user
+        // Find all unseen messages in this conversation not sent by current user
         const unseenMessages = await Message.find({
           conversation: conversationId,
-          receiver: userId,
+          sender: { $ne: userId },
           isSeen: false,
         });
 
-        if (unseenMessages.length === 0) return;
-
-        const messageIds = unseenMessages.map(
-          (msg) => msg._id
-        );
-
         const seenAt = new Date();
 
-        // Update messages
-        await Message.updateMany(
-          { _id: { $in: messageIds } },
-          {
-            isSeen: true,
-            isDelivered: true,
-            seenAt,
-          }
-        );
+        if (unseenMessages.length > 0) {
+          const messageIds = unseenMessages.map((msg) => msg._id);
 
-        // Notify sender(s) that messages have been seen
-        const senderGroups = {};
-        for (const msg of unseenMessages) {
-          const senderId = msg.sender.toString();
-          if (!senderGroups[senderId]) {
-            senderGroups[senderId] = [];
-          }
-          senderGroups[senderId].push({
-            messageId: msg._id.toString(),
-            conversationId: conversationId,
-          });
-        }
-
-        for (const [senderId, seenMsgs] of Object.entries(senderGroups)) {
-          io.to(`user:${senderId}`).emit(
-            "message:seen",
+          // Update messages
+          await Message.updateMany(
+            { _id: { $in: messageIds } },
             {
-              conversationId,
-              messages: seenMsgs,
+              isSeen: true,
+              isDelivered: true,
               seenAt,
-              seenBy: userId,
             }
           );
+        }
+
+        // Notify sender(s) and participants that messages in this conversation have been seen
+        const conversation = await Conversation.findById(conversationId);
+        if (conversation && conversation.participants) {
+          const senderGroups = {};
+          for (const msg of unseenMessages) {
+            const senderId = (msg.sender?._id || msg.sender).toString();
+            if (!senderGroups[senderId]) {
+              senderGroups[senderId] = [];
+            }
+            senderGroups[senderId].push({
+              messageId: msg._id.toString(),
+              conversationId: conversationId.toString(),
+            });
+          }
+
+          const otherParticipants = conversation.participants.filter(
+            (p) => (p?._id || p).toString() !== userId
+          );
+
+          for (const pId of otherParticipants) {
+            const participantId = (pId?._id || pId).toString();
+            io.to(`user:${participantId}`).emit("message:seen", {
+              conversationId: conversationId.toString(),
+              messages: senderGroups[participantId] || [],
+              seenAt,
+              seenBy: userId,
+            });
+          }
         }
       } catch (error) {
         console.error(
@@ -1331,9 +1359,12 @@ const setupSocket = (io) => {
     // ==============================
 
     socket.on("disconnect", async () => {
-      console.log(
-        `Socket disconnected: ${socket.user.name} (${userId}) [${socket.id}]`
-      );
+
+      if (process.env.NODE_ENV !== "production") {
+        console.log(
+          `Socket disconnected: ${socket.user.name} (${userId}) [${socket.id}]`
+        );
+      }
 
       // Clean up user from any active group calls
       for (const [convId, groupCall] of activeGroupCalls.entries()) {
@@ -1378,14 +1409,25 @@ const setupSocket = (io) => {
         }
       }
 
-      // Remove this specific socket from the user's set
-      const userSockets = onlineUsers.get(userId);
+      // ==============================
+      // OFFLINE HANDLER (SHARED BY DISCONNECT & TAB CLOSE EVENT)
+      // ==============================
+      const pruneAndMarkOffline = async () => {
+        const userSockets = onlineUsers.get(userId);
+        let hasAliveSockets = false;
 
-      if (userSockets) {
-        userSockets.delete(socket.id);
+        if (userSockets) {
+          userSockets.delete(socket.id);
+          for (const sId of Array.from(userSockets)) {
+            if (io.sockets?.sockets?.has(sId)) {
+              hasAliveSockets = true;
+            } else {
+              userSockets.delete(sId); // Prune ghost / dead socket
+            }
+          }
+        }
 
-        // Only mark offline if NO sockets remain (all devices disconnected)
-        if (userSockets.size === 0) {
+        if (!hasAliveSockets) {
           onlineUsers.delete(userId);
 
           const lastSeen = new Date();
@@ -1398,7 +1440,7 @@ const setupSocket = (io) => {
             }
           );
 
-          socket.broadcast.emit(
+          io.emit(
             "user:offline",
             {
               userId,
@@ -1407,14 +1449,17 @@ const setupSocket = (io) => {
           );
 
           console.log(
-            `User ${socket.user.name} is now fully offline (all devices disconnected)`
+            `User ${socket.user.name} is now offline (all sockets disconnected)`
           );
         } else {
           console.log(
-            `User ${socket.user.name} still has ${userSockets.size} active connection(s)`
+            `User ${socket.user.name} still has active connection(s)`
           );
         }
-      }
+      };
+
+      socket.on("user:going_offline", pruneAndMarkOffline);
+      socket.on("disconnect", pruneAndMarkOffline);
     });
   });
 };

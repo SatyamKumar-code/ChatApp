@@ -8,6 +8,7 @@ import {
     searchUsers,
     toggleBlockUser,
     getBlockedUsers,
+    setOffline,
 } from '../controllers/authController.js';
 import protect from '../middleware/authMiddleware.js';
 
@@ -17,7 +18,13 @@ authRouter.get("/search", protect, searchUsers);
 authRouter.post("/register", registerUser);
 authRouter.post("/login", loginUser);
 authRouter.post("/refresh", refreshAccessToken);
-authRouter.post("/logout", protect, logoutUser);
+authRouter.post("/offline", async (req, res, next) => {
+    const token = req.cookies?.accessToken || req.headers?.authorization;
+    if (token) {
+        return protect(req, res, next);
+    }
+    next();
+}, setOffline);
 authRouter.put("/profile", protect, updateProfile);
 
 // Block / Unblock user
