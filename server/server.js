@@ -13,6 +13,8 @@ import conversationRouter from './routes/conversationRoutes.js';
 import messageRoutes from './routes/messageRoutes.js';
 import statusRoutes from './routes/statusRoutes.js';
 import callRoutes from './routes/callRoutes.js';
+import fileRoutes from './routes/fileRoutes.js';
+import { cleanupExpiredFiles } from './services/fileStorageService.js';
 
 import { Server } from 'socket.io';
 import { setupSocket } from './socket/socketServer.js';
@@ -63,6 +65,7 @@ app.use("/api/conversations", conversationRouter);
 app.use("/api/messages", messageRoutes);
 app.use("/api/status", statusRoutes);
 app.use("/api/calls", callRoutes);
+app.use("/api/files", fileRoutes);
 
 app.get("/", (req, res) => {
     res.json({
@@ -82,6 +85,16 @@ const startServer = async () => {
         console.log("Reset all users online status to offline on startup");
     } catch (e) {
         console.error("Failed to reset online status on startup:", e);
+    }
+
+    // Run expired files cleanup on boot and every 15 minutes
+    try {
+        await cleanupExpiredFiles(io);
+        setInterval(() => {
+            cleanupExpiredFiles(io);
+        }, 15 * 60 * 1000);
+    } catch (err) {
+        console.error("Failed to run file retention cleanup:", err);
     }
 
     server.listen(PORT, () => {

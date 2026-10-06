@@ -4,6 +4,8 @@ import Avatar from "../common/Avatar";
 import { CallContext } from "../../context/CallContext";
 import { ChatContext } from "../../context/ChatContext";
 import { decryptMessage } from "../../utils/e2ee";
+import CircularTransferProgress from "./CircularTransferProgress";
+import { getLocalFile, triggerDeviceDownload } from "../../services/localFileRegistry";
 
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
 const EXTRA_REACTIONS = [
@@ -34,12 +36,44 @@ export const MessageBubble = ({
     isPinned = false,
     searchHighlight = "",
 }) => {
-    const { selectedMessageIds, toggleSelectMessage, selectedConversation, messages } = useContext(ChatContext) || {};
+    const {
+        selectedMessageIds,
+        toggleSelectMessage,
+        selectedConversation,
+        messages,
+        fileTransfers,
+        downloadAndSaveFile,
+        requestFileRedownload,
+    } = useContext(ChatContext) || {};
     const myId = (currentUserId?._id || currentUserId)?.toString();
     const senderId = (message?.sender?._id || message?.sender)?.toString();
     const isMe = typeof isMyMessage === "boolean" ? isMyMessage : Boolean(myId && senderId && myId === senderId);
     const isSelectionMode = Boolean(selectedMessageIds && selectedMessageIds.length > 0);
     const isSelected = Boolean(selectedMessageIds && selectedMessageIds.includes(message._id));
+
+    // Resolved local file URL (from memory or IndexedDB registry)
+    const [localFileUrl, setLocalFileUrl] = useState(message.fileUrl || "");
+
+    useEffect(() => {
+        let isMounted = true;
+        if (message.fileId) {
+            const transfer = fileTransfers?.[message.fileId];
+            if (transfer?.localUrl) {
+                setLocalFileUrl(transfer.localUrl);
+                return;
+            }
+            getLocalFile(message.fileId).then((record) => {
+                if (isMounted && record?.objectUrl) {
+                    setLocalFileUrl(record.objectUrl);
+                }
+            });
+        } else if (message.fileUrl) {
+            setLocalFileUrl(message.fileUrl);
+        }
+        return () => {
+            isMounted = false;
+        };
+    }, [message.fileId, message.fileUrl, fileTransfers?.[message.fileId]?.localUrl]);
 
     // Decrypted text for quoted reply message
     const [replyText, setReplyText] = useState(() => {
@@ -486,11 +520,44 @@ export const MessageBubble = ({
     const isImage =
         !isAudio &&
         (message.messageType === "image" ||
+            message.fileModelRef === "Image" ||
             (message.fileUrl && message.fileUrl.startsWith("data:image")));
+    const isVideo =
+        !isAudio &&
+        (message.messageType === "video" ||
+            message.fileModelRef === "Video" ||
+            (message.fileUrl && (message.fileUrl.startsWith("data:video") || message.fileUrl.includes(".mp4"))));
     const isFile =
         !isAudio &&
         !isImage &&
-        (message.messageType === "file" || Boolean(message.fileUrl));
+        !isVideo &&
+        (message.messageType === "file" ||
+            message.messageType === "document" ||
+            message.fileModelRef === "Document" ||
+            Boolean(message.fileId));
+
+    const transfer = (message.fileId && fileTransfers?.[message.fileId]) || {};
+    const effectiveFileStatus =
+        transfer.status ||
+        message.fileTransferStatus ||
+        (localFileUrl ? "downloaded" : "download_available");
+    const effectiveProgress = typeof transfer.progress === "number" ? transfer.progress : 0;
+    const effectiveLoaded = transfer.loadedBytes || 0;
+    const effectiveTotal = transfer.totalBytes || message.fileSize || 0;
+
+    const fileName =
+        message.fileName ||
+        message.imageDetails?.fileName ||
+        message.videoDetails?.fileName ||
+        message.documentDetails?.fileName ||
+        "Attachment";
+    const fileSize =
+        message.fileSize ||
+        message.imageDetails?.fileSize ||
+        message.videoDetails?.fileSize ||
+        message.documentDetails?.fileSize ||
+        0;
+    const fileType = isImage ? "image" : isVideo ? "video" : "document";
 
     // Group reactions: { "❤️": { count: 2, users: [...], reactedByMe: true } }
     const reactionGroups = (message.reactions || []).reduce((acc, r) => {
@@ -750,44 +817,180 @@ export const MessageBubble = ({
                         )}
 
                         {/* Voice Note Audio Attachment */}
-                        {isAudio && message.fileUrl && (
+                        {isAudio && (localFileUrl || message.fileUrl) && (
                             <div className="mb-1">
                                 <AudioPlayer
-                                    audioUrl={message.fileUrl}
+                                    audioUrl={localFileUrl || message.fileUrl}
                                     duration={message.duration}
                                     isMyMessage={isMyMessage}
                                 />
                             </div>
                         )}
 
-                        {/* Image Attachment */}
-                        {isImage && message.fileUrl && (
-                            <div className="mb-2 rounded-xl overflow-hidden cursor-pointer group/img relative">
-                                <img
-                                    src={message.fileUrl}
-                                    alt={message.fileName || "Shared image"}
-                                    onClick={() => setShowImagePreview(true)}
-                                    className="w-full max-h-80 object-cover rounded-xl transition-transform duration-200 group-hover/img:scale-[1.01]"
-                                    loading="lazy"
-                                />
-                                <div className="absolute inset-0 bg-black/0 group-hover/img:bg-black/10 transition-colors flex items-center justify-center opacity-0 group-hover/img:opacity-100">
-                                    <span className="px-2.5 py-1 rounded-full bg-black/60 text-white text-[11px] font-medium backdrop-blur-md">
-                                        Click to view
-                                    </span>
-                                </div>
+                        {/* Image Attachment (WhatsApp-Style Circular Transfer) */}
+                        {isImage && (
+                            <div className="mb-2 rounded-2xl overflow-hidden relative group/img bg-black/25 border border-white/10">
+                                {localFileUrl ? (
+                                    <div className="relative">
+                                        <img
+                                            src={localFileUrl}
+                                            alt={fileName}
+                                            onClick={() => setShowImagePreview(true)}
+                                            className="w-full max-h-80 object-cover rounded-2xl cursor-pointer transition-transform duration-200 group-hover/img:scale-[1.01]"
+                                            loading="lazy"
+                                        />
+                                        {/* Circular upload progress overlay */}
+                                        {effectiveFileStatus === "uploading" && (
+                                            <div className="absolute inset-0 bg-black/50 backdrop-blur-[2px] flex items-center justify-center">
+                                                <CircularTransferProgress
+                                                    status="uploading"
+                                                    progress={effectiveProgress}
+                                                    loadedBytes={effectiveLoaded}
+                                                    totalBytes={effectiveTotal}
+                                                    fileSize={fileSize}
+                                                    size={52}
+                                                    isOverlay={true}
+                                                />
+                                            </div>
+                                        )}
+                                        {effectiveFileStatus !== "uploading" && (
+                                            <div className="absolute inset-0 bg-black/0 group-hover/img:bg-black/15 transition-colors flex items-center justify-center opacity-0 group-hover/img:opacity-100 pointer-events-none">
+                                                <span className="px-2.5 py-1 rounded-full bg-black/70 text-white text-[11px] font-medium backdrop-blur-md">
+                                                    Click to view
+                                                </span>
+                                            </div>
+                                        )}
+                                    </div>
+                                ) : (
+                                    /* Receiver Download Card with WhatsApp Circular Progress */
+                                    <div className="w-64 sm:w-72 h-44 rounded-2xl bg-gradient-to-br from-zinc-900/90 to-zinc-950/90 p-3 flex flex-col justify-between relative overflow-hidden">
+                                        <div className="flex items-center justify-between text-xs font-semibold text-white/90">
+                                            <span className="truncate max-w-[170px]">{fileName}</span>
+                                            <span className="text-[10px] text-zinc-400 font-mono">
+                                                {formatBytes(fileSize)}
+                                            </span>
+                                        </div>
+
+                                        <div className="my-auto flex items-center justify-center">
+                                            <CircularTransferProgress
+                                                status={effectiveFileStatus}
+                                                progress={effectiveProgress}
+                                                loadedBytes={effectiveLoaded}
+                                                totalBytes={effectiveTotal}
+                                                fileSize={fileSize}
+                                                size={54}
+                                                onStartDownload={() =>
+                                                    downloadAndSaveFile?.({
+                                                        fileId: message.fileId,
+                                                        fileName,
+                                                        fileType: "image",
+                                                        fileSize,
+                                                        messageId: message._id,
+                                                    })
+                                                }
+                                                onRedownloadAgain={() =>
+                                                    requestFileRedownload?.({
+                                                        fileId: message.fileId,
+                                                        fileName,
+                                                        fileType: "image",
+                                                        fileSize,
+                                                        messageId: message._id,
+                                                    })
+                                                }
+                                            />
+                                        </div>
+
+                                        <div className="text-[10px] text-center text-zinc-400 font-mono">
+                                            {effectiveFileStatus === "downloading"
+                                                ? `Downloading image... ${effectiveProgress}%`
+                                                : effectiveFileStatus === "expired"
+                                                ? "File is no longer available"
+                                                : "Photo • Tap to download"}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         )}
 
-                        {/* Document / File Attachment */}
-                        {isFile && message.fileUrl && (
-                            <a
-                                href={message.fileUrl}
-                                download={message.fileName || "attachment"}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="flex items-center gap-3 p-2.5 mb-2 rounded-xl bg-black/25 hover:bg-black/40 border border-white/10 transition-all group/doc"
-                            >
-                                <div className="w-10 h-10 rounded-lg bg-purple-500/20 text-purple-300 flex items-center justify-center shrink-0 group-hover/doc:scale-105 transition-transform">
+                        {/* Video Attachment (WhatsApp-Style Circular Transfer) */}
+                        {isVideo && (
+                            <div className="mb-2 rounded-2xl overflow-hidden relative group/video bg-black/30 border border-white/10">
+                                {localFileUrl ? (
+                                    <div className="relative">
+                                        <video
+                                            src={localFileUrl}
+                                            controls
+                                            className="w-full max-h-80 rounded-2xl bg-black"
+                                        />
+                                        {effectiveFileStatus === "uploading" && (
+                                            <div className="absolute inset-0 bg-black/60 backdrop-blur-[2px] flex items-center justify-center">
+                                                <CircularTransferProgress
+                                                    status="uploading"
+                                                    progress={effectiveProgress}
+                                                    loadedBytes={effectiveLoaded}
+                                                    totalBytes={effectiveTotal}
+                                                    fileSize={fileSize}
+                                                    size={52}
+                                                    isOverlay={true}
+                                                />
+                                            </div>
+                                        )}
+                                    </div>
+                                ) : (
+                                    /* Receiver Download Card with WhatsApp Circular Progress */
+                                    <div className="w-64 sm:w-72 h-44 rounded-2xl bg-gradient-to-br from-[#12162a]/95 to-zinc-950/95 p-3 flex flex-col justify-between relative overflow-hidden">
+                                        <div className="flex items-center justify-between text-xs font-semibold text-white/90">
+                                            <span className="truncate max-w-[170px]">{fileName}</span>
+                                            <span className="text-[10px] text-zinc-400 font-mono">
+                                                {formatBytes(fileSize)}
+                                            </span>
+                                        </div>
+
+                                        <div className="my-auto flex items-center justify-center">
+                                            <CircularTransferProgress
+                                                status={effectiveFileStatus}
+                                                progress={effectiveProgress}
+                                                loadedBytes={effectiveLoaded}
+                                                totalBytes={effectiveTotal}
+                                                fileSize={fileSize}
+                                                size={54}
+                                                onStartDownload={() =>
+                                                    downloadAndSaveFile?.({
+                                                        fileId: message.fileId,
+                                                        fileName,
+                                                        fileType: "video",
+                                                        fileSize,
+                                                        messageId: message._id,
+                                                    })
+                                                }
+                                                onRedownloadAgain={() =>
+                                                    requestFileRedownload?.({
+                                                        fileId: message.fileId,
+                                                        fileName,
+                                                        fileType: "video",
+                                                        fileSize,
+                                                        messageId: message._id,
+                                                    })
+                                                }
+                                            />
+                                        </div>
+
+                                        <div className="text-[10px] text-center text-zinc-400 font-mono">
+                                            {effectiveFileStatus === "downloading"
+                                                ? `Downloading video... ${effectiveProgress}%`
+                                                : effectiveFileStatus === "expired"
+                                                ? "File is no longer available"
+                                                : "Video • Tap to download"}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* Document / File Attachment (WhatsApp-Style Circular Transfer) */}
+                        {isFile && (
+                            <div className="flex items-center gap-3 p-3 mb-2 rounded-2xl bg-black/25 hover:bg-black/35 border border-white/10 transition-all group/doc">
+                                <div className="w-10 h-10 rounded-xl bg-purple-500/20 text-purple-300 flex items-center justify-center shrink-0">
                                     <svg
                                         xmlns="http://www.w3.org/2000/svg"
                                         className="w-5 h-5"
@@ -804,30 +1007,62 @@ export const MessageBubble = ({
                                     </svg>
                                 </div>
                                 <div className="flex-1 min-w-0">
-                                    <p className="text-xs font-semibold text-white truncate group-hover/doc:underline">
-                                        {message.fileName || "Download Document"}
+                                    <p className="text-xs font-semibold text-white truncate">
+                                        {fileName}
                                     </p>
                                     <p className="text-[10px] text-zinc-400 mt-0.5 font-mono">
-                                        {formatBytes(message.fileSize) || "File"}
+                                        {formatBytes(fileSize) || "Document"}
+                                        {localFileUrl ? " • Saved locally" : ""}
                                     </p>
                                 </div>
-                                <div className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center text-zinc-300 group-hover/doc:text-white shrink-0">
-                                    <svg
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        className="w-4 h-4"
-                                        fill="none"
-                                        viewBox="0 0 24 24"
-                                        stroke="currentColor"
+
+                                {localFileUrl && effectiveFileStatus !== "uploading" ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            if (localFileUrl) {
+                                                const a = document.createElement("a");
+                                                a.href = localFileUrl;
+                                                a.download = fileName;
+                                                a.target = "_blank";
+                                                document.body.appendChild(a);
+                                                a.click();
+                                                document.body.removeChild(a);
+                                            }
+                                        }}
+                                        className="px-2.5 py-1 rounded-lg bg-purple-600/30 hover:bg-purple-600/50 text-purple-200 text-xs font-medium border border-purple-500/30 transition-all shrink-0"
                                     >
-                                        <path
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                            strokeWidth={2}
-                                            d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
-                                        />
-                                    </svg>
-                                </div>
-                            </a>
+                                        Open
+                                    </button>
+                                ) : (
+                                    <CircularTransferProgress
+                                        status={effectiveFileStatus}
+                                        progress={effectiveProgress}
+                                        loadedBytes={effectiveLoaded}
+                                        totalBytes={effectiveTotal}
+                                        fileSize={fileSize}
+                                        size={44}
+                                        onStartDownload={() =>
+                                            downloadAndSaveFile?.({
+                                                fileId: message.fileId,
+                                                fileName,
+                                                fileType: "document",
+                                                fileSize,
+                                                messageId: message._id,
+                                            })
+                                        }
+                                        onRedownloadAgain={() =>
+                                            requestFileRedownload?.({
+                                                fileId: message.fileId,
+                                                fileName,
+                                                fileType: "document",
+                                                fileSize,
+                                                messageId: message._id,
+                                            })
+                                        }
+                                    />
+                                )}
+                            </div>
                         )}
 
                         {/* Message Body / Caption */}
@@ -837,11 +1072,50 @@ export const MessageBubble = ({
                             </p>
                         )}
 
-                        {/* Message Footer: Timestamp & Status & Star */}
+                        {/* Message Footer: Timestamp, Separate File Transfer Status & Message Ticks */}
                         <div
-                            className={`flex items-center justify-end gap-1.5 mt-1 select-none text-[10px] ${isMyMessage ? "text-purple-200" : "text-zinc-400"
-                                }`}
+                            className={`flex items-center justify-end gap-1.5 mt-1 select-none text-[10px] ${
+                                isMyMessage ? "text-purple-200" : "text-zinc-400"
+                            }`}
                         >
+                            {/* Separate File Transfer Status Indicator */}
+                            {(message.fileId || isImage || isVideo || isFile) && (
+                                <span className="mr-1 text-[10px] font-medium tracking-tight">
+                                    {effectiveFileStatus === "uploading" ? (
+                                        <span className="text-purple-300">
+                                            Uploading {effectiveProgress > 0 ? `${effectiveProgress}%` : ""}
+                                        </span>
+                                    ) : isMe && (effectiveFileStatus === "pending_delivery" || effectiveFileStatus === "uploaded") ? (
+                                        <span className="text-zinc-400/90 italic">
+                                            ✓ File sent • Waiting for receiver
+                                        </span>
+                                    ) : isMe && effectiveFileStatus === "download_available" ? (
+                                        <span className="text-emerald-400 font-medium">
+                                            ✓ Delivered • Waiting for download
+                                        </span>
+                                    ) : effectiveFileStatus === "downloaded" ? (
+                                        <span className="text-emerald-400 font-medium">
+                                            Saved locally
+                                        </span>
+                                    ) : effectiveFileStatus === "expired" ? (
+                                        <span className="text-amber-400 font-medium italic">
+                                            File expired on server
+                                        </span>
+                                    ) : effectiveFileStatus === "checking_sender" ? (
+                                        <span className="text-sky-300 font-medium italic">
+                                            Checking sender...
+                                        </span>
+                                    ) : effectiveFileStatus === "waiting_for_sender" ? (
+                                        <span className="text-sky-300 font-medium italic">
+                                            Waiting for sender
+                                        </span>
+                                    ) : effectiveFileStatus === "unavailable" ? (
+                                        <span className="text-zinc-400 italic">
+                                            Unavailable
+                                        </span>
+                                    ) : null}
+                                </span>
+                            )}
                             {/* Pinned Indicator Badge */}
                             {isPinned && (
                                 <svg

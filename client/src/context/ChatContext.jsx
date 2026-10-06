@@ -12,6 +12,15 @@ import { AuthContext } from "./AuthContext";
 import socket from "../services/socket";
 import { playMessageSound } from "../utils/callSounds";
 import { encryptMessage, decryptMessage } from "../utils/e2ee";
+import {
+    saveLocalFile,
+    getLocalFile,
+    hasLocalFile,
+    saveSenderOriginal,
+    getSenderOriginal,
+    triggerDeviceDownload,
+    getLocalPCPath,
+} from "../services/localFileRegistry";
 
 export const ChatContext = createContext();
 
@@ -125,6 +134,11 @@ const ChatProvider = ({ children }) => {
 
     // Multi-select messages state
     const [selectedMessageIds, setSelectedMessageIds] = useState([]);
+
+    // Offline file delivery and transfer states
+    // fileId -> { status, progress, loadedBytes, totalBytes, localUrl, error }
+    const [fileTransfers, setFileTransfers] = useState({});
+    const [pendingOfflineFiles, setPendingOfflineFiles] = useState([]);
 
     const toggleSelectMessage = (messageId) => {
         if (!messageId) return;
@@ -762,6 +776,128 @@ const ChatProvider = ({ children }) => {
             });
         };
 
+        // ==============================
+        // OFFLINE FILE TRANSFER SOCKET HANDLERS
+        // ==============================
+        const handleFilePendingList = (data) => {
+            const { pendingFiles } = data || {};
+            if (Array.isArray(pendingFiles)) {
+                setPendingOfflineFiles(pendingFiles);
+                setFileTransfers((prev) => {
+                    const updated = { ...prev };
+                    pendingFiles.forEach((f) => {
+                        if (!updated[f.fileId] || updated[f.fileId].status !== "downloaded") {
+                            updated[f.fileId] = {
+                                status: f.status || "download_available",
+                                progress: 0,
+                                fileSize: f.fileSize,
+                                fileName: f.fileName,
+                                fileType: f.fileType,
+                            };
+                        }
+                    });
+                    return updated;
+                });
+            }
+        };
+
+        const handleFileAvailable = (data) => {
+            const { fileId, fileName, fileSize, fileType, status } = data || {};
+            if (fileId) {
+                setFileTransfers((prev) => ({
+                    ...prev,
+                    [fileId]: {
+                        status: status || "download_available",
+                        progress: 0,
+                        fileSize,
+                        fileName,
+                        fileType,
+                    },
+                }));
+            }
+        };
+
+        const handleFileStatusUpdate = (data) => {
+            const { fileId, status, messageId, receiverOnline } = data || {};
+            if (!fileId) return;
+
+            setFileTransfers((prev) => {
+                const existing = prev[fileId] || {};
+                return {
+                    ...prev,
+                    [fileId]: {
+                        ...existing,
+                        status: status || existing.status,
+                        receiverOnline: typeof receiverOnline === "boolean" ? receiverOnline : existing.receiverOnline,
+                    },
+                };
+            });
+
+            setMessages((prev) =>
+                prev.map((m) => {
+                    if (m.fileId === fileId || (messageId && m._id?.toString() === messageId.toString())) {
+                        return {
+                            ...m,
+                            fileTransferStatus: status,
+                            fileDelivery: m.fileDelivery ? { ...m.fileDelivery, status } : { fileId, status },
+                        };
+                    }
+                    return m;
+                })
+            );
+        };
+
+        const handleRequestReupload = async (data) => {
+            const { fileId, fileName } = data || {};
+            if (!fileId) return;
+            try {
+                console.log(`[OfflineSync] Sender received re-upload request for file: ${fileId}`);
+                const originalBlob = await getSenderOriginal(fileId);
+                if (!originalBlob) {
+                    console.warn(`[OfflineSync] Original file missing from local registry: ${fileId}`);
+                    if (socket && socket.connected) {
+                        socket.emit("file:reupload_failed", { fileId, reason: "original_deleted" });
+                    }
+                    await api.post("/files/reupload-failed", { fileId }).catch(() => {});
+                    return;
+                }
+
+                const formData = new FormData();
+                formData.append("fileId", fileId);
+                formData.append("file", originalBlob, fileName || "attachment");
+
+                await api.post("/files/reupload", formData, {
+                    headers: { "Content-Type": "multipart/form-data" },
+                });
+                console.log(`[OfflineSync] Successfully re-uploaded original file: ${fileId}`);
+            } catch (err) {
+                console.error("[OfflineSync] Re-upload error:", err);
+                if (socket && socket.connected) {
+                    socket.emit("file:reupload_failed", { fileId, reason: err.message });
+                }
+            }
+        };
+
+        const handleReuploadReady = (data) => {
+            const { fileId } = data || {};
+            if (fileId) {
+                setFileTransfers((prev) => ({
+                    ...prev,
+                    [fileId]: {
+                        ...(prev[fileId] || {}),
+                        status: "download_available",
+                    },
+                }));
+                setMessages((prev) =>
+                    prev.map((m) =>
+                        m.fileId === fileId
+                            ? { ...m, fileTransferStatus: "download_available" }
+                            : m
+                    )
+                );
+            }
+        };
+
         socket.on("connect", handleConnect);
         socket.on("socket:connected", handleSocketConnected);
         socket.on("connect_error", handleConnectError);
@@ -779,6 +915,13 @@ const ChatProvider = ({ children }) => {
         socket.on("group:updated", handleGroupUpdated);
         socket.on("group:created", handleGroupCreated);
         socket.on("group:removed", handleGroupRemoved);
+
+        // Offline file delivery listeners
+        socket.on("file:pending_list", handleFilePendingList);
+        socket.on("file:available", handleFileAvailable);
+        socket.on("file:status_update", handleFileStatusUpdate);
+        socket.on("file:request_reupload", handleRequestReupload);
+        socket.on("file:reupload_ready", handleReuploadReady);
 
         return () => {
             socket.off("connect", handleConnect);
@@ -798,6 +941,12 @@ const ChatProvider = ({ children }) => {
             socket.off("group:updated", handleGroupUpdated);
             socket.off("group:created", handleGroupCreated);
             socket.off("group:removed", handleGroupRemoved);
+
+            socket.off("file:pending_list", handleFilePendingList);
+            socket.off("file:available", handleFileAvailable);
+            socket.off("file:status_update", handleFileStatusUpdate);
+            socket.off("file:request_reupload", handleRequestReupload);
+            socket.off("file:reupload_ready", handleReuploadReady);
 
             socket.disconnect();
         };
@@ -1088,12 +1237,27 @@ const ChatProvider = ({ children }) => {
         const text = data.text ? data.text.trim() : "";
         const fileUrl = data.fileUrl || "";
 
-        if (!text && !fileUrl) return;
+        if (!text && !fileUrl && !data.file) return;
+
+        const replyToId = data.replyTo || replyingTo?._id || null;
+
+        // If a physical file is provided, use offline file delivery system with circular progress
+        if (data.file) {
+            return uploadAndSendFile({
+                file: data.file,
+                caption: text,
+                fileType: data.messageType,
+                replyTo: replyToId,
+                width: data.width,
+                height: data.height,
+                duration: data.duration,
+                pageCount: data.pageCount,
+            });
+        }
 
         // Stop typing when sending
         stopTyping();
 
-        const replyToId = data.replyTo || replyingTo?._id || null;
         const tempId = `temp_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
         const isOnlineAndConnected = Boolean(socket && socket.connected && navigator.onLine);
 
@@ -1184,6 +1348,434 @@ const ChatProvider = ({ children }) => {
 
         // Online & connected: transmit through socket
         socket.emit("sendMessage", emitPayload);
+    };
+
+    /**
+     * Upload and send file via temporary encrypted server storage
+     * Supports WhatsApp-style circular upload progress & offline asynchronous delivery
+     */
+    const uploadAndSendFile = async ({
+        file,
+        caption = "",
+        fileType = null,
+        replyTo = null,
+        width = null,
+        height = null,
+        duration = 0,
+        pageCount = null,
+    }) => {
+        if (!selectedConversation || !file) return;
+
+        // Auto-detect fileType
+        const mime = file.type || "";
+        let detectedType = fileType;
+        if (!detectedType) {
+            if (mime.startsWith("image/")) detectedType = "image";
+            else if (mime.startsWith("video/")) detectedType = "video";
+            else detectedType = "document";
+        }
+
+        const fileId = `file_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+        const tempId = `temp_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+        const replyToId = replyTo || replyingTo?._id || null;
+        const receiverId = selectedConversation.isGroup
+            ? null
+            : (selectedConversation.user?._id || selectedConversation.user);
+
+        // 1. Immediately store sender's original file in local registry
+        try {
+            await saveSenderOriginal(fileId, file, {
+                fileType: detectedType,
+                fileName: file.name,
+                fileSize: file.size,
+                mimeType: mime,
+            });
+        } catch (e) {
+            console.error("Failed to save sender original file:", e);
+        }
+
+        // 2. Create local object URL for instant preview on sender device
+        const localPreviewUrl = URL.createObjectURL(file);
+
+        // 3. Optimistic message presentation with circular progress indicator
+        const optimisticMsg = {
+            _id: tempId,
+            tempId,
+            conversation: selectedConversation._id,
+            sender: user,
+            receiver: receiverId,
+            text: caption,
+            messageType: detectedType,
+            fileId,
+            fileName: file.name,
+            fileSize: file.size,
+            fileTransferStatus: "uploading",
+            fileDelivery: {
+                fileId,
+                status: "uploading",
+                fileName: file.name,
+                fileSize: file.size,
+                fileType: detectedType,
+            },
+            fileUrl: detectedType === "image" ? localPreviewUrl : "",
+            createdAt: new Date().toISOString(),
+            isPending: false,
+            status: "sent",
+            isDelivered: false,
+            isSeen: false,
+            replyTo: replyingTo ? { ...replyingTo } : null,
+        };
+
+        setFileTransfers((prev) => ({
+            ...prev,
+            [fileId]: {
+                status: "uploading",
+                progress: 0,
+                loadedBytes: 0,
+                totalBytes: file.size,
+                localUrl: localPreviewUrl,
+            },
+        }));
+
+        setMessages((prev) => {
+            const updated = [...prev, optimisticMsg];
+            saveCachedMessages(selectedConversation._id, updated);
+            return updated;
+        });
+
+        setConversations((prev) =>
+            prev.map((c) =>
+                c._id === selectedConversation._id
+                    ? {
+                          ...c,
+                          lastMessage: {
+                              _id: tempId,
+                              text: caption || `Shared ${detectedType}`,
+                              sender: user._id,
+                              createdAt: optimisticMsg.createdAt,
+                          },
+                          lastMessageAt: optimisticMsg.createdAt,
+                      }
+                    : c
+            )
+        );
+
+        setReplyingTo(null);
+
+        // 4. Multi-part streaming upload using XMLHttpRequest for real-time circular progress
+        const formData = new FormData();
+        formData.append("file", file);
+        formData.append("fileId", fileId);
+        formData.append("conversationId", selectedConversation._id);
+        if (receiverId) formData.append("receiverId", receiverId);
+        formData.append("fileType", detectedType);
+        formData.append("caption", caption);
+        if (replyToId) formData.append("replyTo", replyToId);
+        formData.append("tempId", tempId);
+        if (width) formData.append("width", width);
+        if (height) formData.append("height", height);
+        if (duration) formData.append("duration", duration);
+        if (pageCount) formData.append("pageCount", pageCount);
+        formData.append("originalSenderPath", getLocalPCPath(file.name, detectedType));
+
+        return new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open("POST", `${import.meta.env.VITE_SERVER_URL}/api/files/upload`);
+            xhr.withCredentials = true;
+
+            xhr.upload.onprogress = (evt) => {
+                if (evt.lengthComputable) {
+                    const progress = Math.min(100, Math.round((evt.loaded / evt.total) * 100));
+                    setFileTransfers((prev) => ({
+                        ...prev,
+                        [fileId]: {
+                            status: progress >= 100 ? "uploaded" : "uploading",
+                            progress,
+                            loadedBytes: evt.loaded,
+                            totalBytes: evt.total,
+                            localUrl: localPreviewUrl,
+                        },
+                    }));
+                }
+            };
+
+            xhr.onload = () => {
+                if (xhr.status >= 200 && xhr.status < 300) {
+                    try {
+                        const resData = JSON.parse(xhr.responseText);
+                        const confirmedMsg = resData.message;
+
+                        setFileTransfers((prev) => ({
+                            ...prev,
+                            [fileId]: {
+                                status: "pending_delivery",
+                                progress: 100,
+                                loadedBytes: file.size,
+                                totalBytes: file.size,
+                                localUrl: localPreviewUrl,
+                            },
+                        }));
+
+                        setMessages((prev) => {
+                            const updated = prev.map((m) =>
+                                m.tempId === tempId || m._id === tempId
+                                    ? {
+                                          ...confirmedMsg,
+                                          fileUrl: m.fileUrl || confirmedMsg.fileUrl || localPreviewUrl,
+                                          fileTransferStatus: "pending_delivery",
+                                      }
+                                    : m
+                            );
+                            saveCachedMessages(selectedConversation._id, updated);
+                            return updated;
+                        });
+
+                        resolve(confirmedMsg);
+                    } catch (e) {
+                        reject(e);
+                    }
+                } else {
+                    setFileTransfers((prev) => ({
+                        ...prev,
+                        [fileId]: {
+                            status: "failed",
+                            progress: 0,
+                            error: "Upload failed",
+                        },
+                    }));
+                    reject(new Error("Upload failed with status " + xhr.status));
+                }
+            };
+
+            xhr.onerror = () => {
+                setFileTransfers((prev) => ({
+                    ...prev,
+                    [fileId]: {
+                        status: "failed",
+                        progress: 0,
+                        error: "Network error",
+                    },
+                }));
+                reject(new Error("Network error during file upload"));
+            };
+
+            xhr.send(formData);
+        });
+    };
+
+    /**
+     * Download file with WhatsApp-style circular progress & save to local storage
+     * Triggers acknowledgement so server deletes temporary file!
+     */
+    const downloadAndSaveFile = async ({
+        fileId,
+        fileName,
+        fileType,
+        fileSize,
+        messageId,
+    }) => {
+        if (!fileId) return;
+
+        // Check if already in local registry
+        const existing = await getLocalFile(fileId);
+        if (existing && existing.objectUrl) {
+            setFileTransfers((prev) => ({
+                ...prev,
+                [fileId]: {
+                    status: "downloaded",
+                    progress: 100,
+                    localUrl: existing.objectUrl,
+                },
+            }));
+            return existing.objectUrl;
+        }
+
+        setFileTransfers((prev) => ({
+            ...prev,
+            [fileId]: {
+                status: "downloading",
+                progress: 0,
+                loadedBytes: 0,
+                totalBytes: fileSize || 0,
+            },
+        }));
+
+        return new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open("GET", `${import.meta.env.VITE_SERVER_URL}/api/files/download/${fileId}`);
+            xhr.withCredentials = true;
+            xhr.responseType = "blob";
+
+            xhr.onprogress = (evt) => {
+                const total = evt.lengthComputable ? evt.total : fileSize || 0;
+                const loaded = evt.loaded;
+                const progress = total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : 50;
+
+                setFileTransfers((prev) => ({
+                    ...prev,
+                    [fileId]: {
+                        status: "downloading",
+                        progress,
+                        loadedBytes: loaded,
+                        totalBytes: total,
+                    },
+                }));
+            };
+
+            xhr.onload = async () => {
+                if (xhr.status === 200) {
+                    try {
+                        const blob = xhr.response;
+
+                        // 1. Save permanently to local IndexedDB registry
+                        const saved = await saveLocalFile({
+                            fileId,
+                            messageId,
+                            blob,
+                            fileName,
+                            fileType,
+                            mimeType: blob.type,
+                            fileSize: blob.size,
+                        });
+
+                        // 2. Trigger browser download to device PC (Downloads/ChatApp/...)
+                        triggerDeviceDownload(blob, fileName, fileType);
+
+                        // 3. Acknowledge download completion so server deletes temporary encrypted copy!
+                        api.post(`/files/acknowledge/${fileId}`).catch(() => {});
+                        if (socket && socket.connected) {
+                            socket.emit("file:download_complete", { fileId });
+                        }
+
+                        const objectUrl = saved?.objectUrl || URL.createObjectURL(blob);
+
+                        setFileTransfers((prev) => ({
+                            ...prev,
+                            [fileId]: {
+                                status: "downloaded",
+                                progress: 100,
+                                localUrl: objectUrl,
+                            },
+                        }));
+
+                        setMessages((prev) =>
+                            prev.map((m) =>
+                                m.fileId === fileId
+                                    ? {
+                                          ...m,
+                                          fileTransferStatus: "downloaded",
+                                          fileUrl: m.fileUrl || objectUrl,
+                                      }
+                                    : m
+                            )
+                        );
+
+                        resolve(objectUrl);
+                    } catch (err) {
+                        console.error("Save local file error:", err);
+                        reject(err);
+                    }
+                } else if (xhr.status === 410) {
+                    // Expired on server
+                    setFileTransfers((prev) => ({
+                        ...prev,
+                        [fileId]: {
+                            status: "expired",
+                            progress: 0,
+                            error: "File is no longer available on server",
+                        },
+                    }));
+                    setMessages((prev) =>
+                        prev.map((m) =>
+                            m.fileId === fileId
+                                ? { ...m, fileTransferStatus: "expired" }
+                                : m
+                        )
+                    );
+                    reject(new Error("File expired"));
+                } else {
+                    setFileTransfers((prev) => ({
+                        ...prev,
+                        [fileId]: {
+                            status: "failed",
+                            progress: 0,
+                            error: "Download failed",
+                        },
+                    }));
+                    reject(new Error("Download failed: " + xhr.status));
+                }
+            };
+
+            xhr.onerror = () => {
+                setFileTransfers((prev) => ({
+                    ...prev,
+                    [fileId]: {
+                        status: "failed",
+                        progress: 0,
+                        error: "Network error",
+                    },
+                }));
+                reject(new Error("Network error during file download"));
+            };
+
+            xhr.send();
+        });
+    };
+
+    /**
+     * Request redownload ("Download Again") with recovery logic
+     */
+    const requestFileRedownload = async (fileParams) => {
+        const { fileId, fileName, fileType, fileSize, messageId } = fileParams || {};
+        if (!fileId) return;
+
+        setFileTransfers((prev) => ({
+            ...prev,
+            [fileId]: {
+                status: "checking_sender",
+                progress: 0,
+            },
+        }));
+
+        try {
+            const res = await api.post(`/files/redownload-request/${fileId}`);
+            if (res.data?.success) {
+                if (res.data.status === "available") {
+                    return downloadAndSaveFile({
+                        fileId,
+                        fileName,
+                        fileType,
+                        fileSize,
+                        messageId,
+                    });
+                } else if (res.data.status === "checking_sender") {
+                    setFileTransfers((prev) => ({
+                        ...prev,
+                        [fileId]: {
+                            status: "checking_sender",
+                            message: "Temporary copy unavailable. Checking sender's original file...",
+                        },
+                    }));
+                } else if (res.data.status === "waiting_for_sender") {
+                    setFileTransfers((prev) => ({
+                        ...prev,
+                        [fileId]: {
+                            status: "waiting_for_sender",
+                            message: "Waiting for sender to come online to re-send file...",
+                        },
+                    }));
+                }
+            }
+        } catch (err) {
+            console.error("Redownload request error:", err);
+            setFileTransfers((prev) => ({
+                ...prev,
+                [fileId]: {
+                    status: "unavailable",
+                    message: "File is currently unavailable.",
+                },
+            }));
+        }
     };
 
     const reactToMessage = async (messageId, emoji) => {
@@ -1792,6 +2384,13 @@ const ChatProvider = ({ children }) => {
         // Online / Offline tracking
         isOffline,
         justReconnected,
+
+        // Offline File Transfer & Asynchronous Delivery
+        fileTransfers,
+        pendingOfflineFiles,
+        uploadAndSendFile,
+        downloadAndSaveFile,
+        requestFileRedownload,
     };
 
 

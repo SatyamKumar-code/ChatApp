@@ -68,6 +68,7 @@ export const MessageInput = ({ onSendMessage, onTyping, onStopTyping, disabled =
 
     const inputRef = useRef(null);
     const imageInputRef = useRef(null);
+    const videoInputRef = useRef(null);
     const fileInputRef = useRef(null);
 
     // Audio recording refs
@@ -76,39 +77,34 @@ export const MessageInput = ({ onSendMessage, onTyping, onStopTyping, disabled =
     const timerRef = useRef(null);
     const streamRef = useRef(null);
 
-    // Process selected image or document
+    // Process selected image, video, or document
     const processFile = (file) => {
         if (!file) return;
 
-        // 8MB limit
-        if (file.size > 8 * 1024 * 1024) {
-            setErrorMsg("File is too large. Maximum size is 8MB.");
+        // 1GB streaming limit
+        if (file.size > 1024 * 1024 * 1024) {
+            setErrorMsg("File is too large. Maximum size is 1GB.");
             setTimeout(() => setErrorMsg(""), 4000);
             return;
         }
 
         const isImage = file.type.startsWith("image/");
-        const reader = new FileReader();
+        const isVideo = file.type.startsWith("video/");
+        const isDocument = !isImage && !isVideo;
+        const fileUrl = isImage || isVideo ? URL.createObjectURL(file) : "";
 
-        reader.onload = (e) => {
-            setSelectedFile({
-                file,
-                fileUrl: e.target.result,
-                fileName: file.name,
-                fileSize: file.size,
-                messageType: isImage ? "image" : "file",
-                isImage,
-            });
-            setShowAttachMenu(false);
-            inputRef.current?.focus();
-        };
-
-        reader.onerror = () => {
-            setErrorMsg("Failed to read file.");
-            setTimeout(() => setErrorMsg(""), 3000);
-        };
-
-        reader.readAsDataURL(file);
+        setSelectedFile({
+            file,
+            fileUrl,
+            fileName: file.name,
+            fileSize: file.size,
+            messageType: isImage ? "image" : isVideo ? "video" : "document",
+            isImage,
+            isVideo,
+            isDocument,
+        });
+        setShowAttachMenu(false);
+        inputRef.current?.focus();
     };
 
     const handleFileChange = (e) => {
@@ -246,6 +242,7 @@ export const MessageInput = ({ onSendMessage, onTyping, onStopTyping, disabled =
         if (selectedFile) {
             onSendMessage({
                 text: trimmedText,
+                file: selectedFile.file,
                 fileUrl: selectedFile.fileUrl,
                 fileName: selectedFile.fileName,
                 fileSize: selectedFile.fileSize,
@@ -375,6 +372,13 @@ export const MessageInput = ({ onSendMessage, onTyping, onStopTyping, disabled =
                 className="hidden"
             />
             <input
+                ref={videoInputRef}
+                type="file"
+                accept="video/*"
+                onChange={handleFileChange}
+                className="hidden"
+            />
+            <input
                 ref={fileInputRef}
                 type="file"
                 accept=".pdf,.doc,.docx,.txt,.zip,.rar,.xls,.xlsx,.ppt,.pptx,.csv"
@@ -412,7 +416,7 @@ export const MessageInput = ({ onSendMessage, onTyping, onStopTyping, disabled =
 
             {/* Attachment Menu Popup */}
             {showAttachMenu && !isRecording && (
-                <div className="absolute bottom-full left-4 mb-2 w-48 p-1.5 bg-[#16162c] border border-white/10 rounded-2xl shadow-xl shadow-black/50 z-30 animate-in fade-in zoom-in-95 duration-150 space-y-1">
+                <div className="absolute bottom-full left-4 mb-2 w-52 p-1.5 bg-[#16162c] border border-white/10 rounded-2xl shadow-xl shadow-black/50 z-30 animate-in fade-in zoom-in-95 duration-150 space-y-1">
                     <button
                         type="button"
                         onClick={() => {
@@ -429,6 +433,25 @@ export const MessageInput = ({ onSendMessage, onTyping, onStopTyping, disabled =
                         <div>
                             <p>Photo or Image</p>
                             <span className="text-[10px] text-zinc-500 font-normal">PNG, JPG, WebP</span>
+                        </div>
+                    </button>
+
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setShowAttachMenu(false);
+                            videoInputRef.current?.click();
+                        }}
+                        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold text-zinc-200 hover:text-white hover:bg-white/10 transition-all text-left group"
+                    >
+                        <div className="w-8 h-8 rounded-lg bg-emerald-500/15 border border-emerald-500/20 text-emerald-400 flex items-center justify-center group-hover:scale-105 transition-transform">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                            </svg>
+                        </div>
+                        <div>
+                            <p>Video</p>
+                            <span className="text-[10px] text-zinc-500 font-normal">MP4, WebM, MKV</span>
                         </div>
                     </button>
 
@@ -463,6 +486,13 @@ export const MessageInput = ({ onSendMessage, onTyping, onStopTyping, disabled =
                                 alt="Preview"
                                 className="w-12 h-12 rounded-xl object-cover ring-1 ring-white/10 shrink-0"
                             />
+                        ) : selectedFile.isVideo ? (
+                            <div className="w-12 h-12 rounded-xl bg-emerald-600/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                            </div>
                         ) : (
                             <div className="w-12 h-12 rounded-xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 shrink-0">
                                 <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -475,7 +505,7 @@ export const MessageInput = ({ onSendMessage, onTyping, onStopTyping, disabled =
                                 {selectedFile.fileName}
                             </p>
                             <p className="text-[10px] text-zinc-400 mt-0.5 font-mono">
-                                {formatBytes(selectedFile.fileSize)} • {selectedFile.isImage ? "Image" : "Document"}
+                                {formatBytes(selectedFile.fileSize)} • {selectedFile.isImage ? "Image" : selectedFile.isVideo ? "Video" : "Document"}
                             </p>
                         </div>
                     </div>

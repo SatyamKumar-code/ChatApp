@@ -4,6 +4,8 @@ import User from "../models/User.js";
 import Conversation from "../models/Conversation.js";
 import Message from "../models/Message.js";
 import Call from "../models/Call.js";
+import PendingFileDelivery from "../models/PendingFileDelivery.js";
+import { deleteTemporaryFile } from "../services/fileStorageService.js";
 
 // Map<userId, Set<socketId>> — supports multiple devices per user
 const onlineUsers = new Map();
@@ -212,6 +214,141 @@ const setupSocket = (io) => {
         error
       );
     }
+
+    // ==============================
+    // ON CONNECT: OFFLINE FILE DELIVERY NOTIFICATIONS
+    // ==============================
+    try {
+      // Find all files where receiverId = currentUser AND status in pending_delivery / available
+      const pendingDeliveries = await PendingFileDelivery.find({
+        receiverId: userId,
+        status: {
+          $in: [
+            "pending_delivery",
+            "receiver_online",
+            "download_available",
+            "available",
+            "downloading",
+          ],
+        },
+        expiresAt: { $gt: new Date() },
+      });
+
+      if (pendingDeliveries.length > 0) {
+        console.log(
+          `[OfflineFiles] Found ${pendingDeliveries.length} waiting files for ${socket.user.name}`
+        );
+
+        socket.emit("file:pending_list", {
+          pendingFiles: pendingDeliveries,
+        });
+
+        // Notify senders that receiver is now online
+        for (const item of pendingDeliveries) {
+          if (item.status === "pending_delivery") {
+            item.status = "download_available";
+            await item.save();
+          }
+
+          io.to(`user:${item.senderId.toString()}`).emit("file:status_update", {
+            fileId: item.fileId,
+            messageId: item.messageId,
+            status: "download_available",
+            receiverOnline: true,
+          });
+        }
+      }
+
+      // Check if this user is a sender with pending re-upload requests
+      const pendingReuploads = await PendingFileDelivery.find({
+        senderId: userId,
+        status: "waiting_for_sender",
+        expiresAt: { $gt: new Date() },
+      });
+
+      for (const item of pendingReuploads) {
+        socket.emit("file:request_reupload", {
+          fileId: item.fileId,
+          messageId: item.messageId,
+          fileName: item.fileName,
+          fileType: item.fileType,
+          fileSize: item.fileSize,
+          receiverId: item.receiverId.toString(),
+        });
+      }
+    } catch (error) {
+      console.error("[OfflineFiles] Error checking pending deliveries:", error);
+    }
+
+    // ==============================
+    // FILE TRANSFER SOCKET HANDLERS
+    // ==============================
+    socket.on("file:download_complete", async (payload) => {
+      try {
+        const { fileId } = payload || {};
+        if (!fileId) return;
+
+        const delivery = await PendingFileDelivery.findOne({ fileId });
+        if (delivery) {
+          delivery.status = "completed";
+          delivery.acknowledgedAt = new Date();
+          delivery.downloadProgress = 100;
+          await delivery.save();
+
+          if (delivery.messageId) {
+            await Message.updateOne(
+              { _id: delivery.messageId },
+              { fileTransferStatus: "downloaded", isDelivered: true }
+            );
+          }
+
+          await deleteTemporaryFile(fileId);
+
+          io.to(`user:${delivery.senderId.toString()}`).emit("file:status_update", {
+            fileId,
+            messageId: delivery.messageId,
+            status: "downloaded",
+          });
+
+          io.to(`user:${delivery.receiverId.toString()}`).emit("file:status_update", {
+            fileId,
+            messageId: delivery.messageId,
+            status: "downloaded",
+          });
+        }
+      } catch (err) {
+        console.error("file:download_complete socket error:", err);
+      }
+    });
+
+    socket.on("file:reupload_failed", async (payload) => {
+      try {
+        const { fileId } = payload || {};
+        if (!fileId) return;
+
+        const delivery = await PendingFileDelivery.findOne({ fileId });
+        if (delivery) {
+          delivery.status = "unavailable";
+          delivery.senderAvailableForReupload = false;
+          await delivery.save();
+
+          if (delivery.messageId) {
+            await Message.updateOne(
+              { _id: delivery.messageId },
+              { fileTransferStatus: "unavailable" }
+            );
+          }
+
+          io.to(`user:${delivery.receiverId.toString()}`).emit("file:status_update", {
+            fileId,
+            status: "unavailable",
+            message: "File is currently unavailable.",
+          });
+        }
+      } catch (err) {
+        console.error("file:reupload_failed socket error:", err);
+      }
+    });
 
     // ==============================
     // SEND MESSAGE

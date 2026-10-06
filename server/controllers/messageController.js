@@ -1,6 +1,54 @@
 import Message from "../models/Message.js";
 import Conversation from "../models/Conversation.js";
 import User from "../models/User.js";
+import Image from "../models/Image.js";
+import Video from "../models/Video.js";
+import Document from "../models/Document.js";
+import PendingFileDelivery from "../models/PendingFileDelivery.js";
+
+export const enrichMessagesWithFiles = async (messages) => {
+  if (!messages || messages.length === 0) return [];
+  const messageIds = messages.map((m) => m._id);
+  const fileIds = messages.map((m) => m.fileId).filter(Boolean);
+
+  const [images, videos, documents, deliveries] = await Promise.all([
+    Image.find({ messageId: { $in: messageIds } }).lean(),
+    Video.find({ messageId: { $in: messageIds } }).lean(),
+    Document.find({ messageId: { $in: messageIds } }).lean(),
+    fileIds.length > 0
+      ? PendingFileDelivery.find({ fileId: { $in: fileIds } }).lean()
+      : [],
+  ]);
+
+  const imageMap = new Map(images.map((img) => [img.messageId.toString(), img]));
+  const videoMap = new Map(videos.map((vid) => [vid.messageId.toString(), vid]));
+  const docMap = new Map(documents.map((doc) => [doc.messageId.toString(), doc]));
+  const deliveryMap = new Map(deliveries.map((del) => [del.fileId, del]));
+
+  return messages.map((msg) => {
+    const obj = msg.toObject ? msg.toObject() : { ...msg };
+    const idStr = obj._id.toString();
+
+    if (imageMap.has(idStr)) obj.imageDetails = imageMap.get(idStr);
+    if (videoMap.has(idStr)) obj.videoDetails = videoMap.get(idStr);
+    if (docMap.has(idStr)) obj.documentDetails = docMap.get(idStr);
+
+    if (obj.fileId && deliveryMap.has(obj.fileId)) {
+      const del = deliveryMap.get(obj.fileId);
+      obj.fileDelivery = {
+        fileId: del.fileId,
+        status: del.status,
+        expiresAt: del.expiresAt,
+        fileName: del.fileName,
+        fileSize: del.fileSize,
+        mimeType: del.mimeType,
+        fileType: del.fileType,
+      };
+      obj.fileTransferStatus = del.status;
+    }
+    return obj;
+  });
+};
 
 
 // Send message
@@ -229,9 +277,11 @@ const getMessages = async (req, res) => {
         createdAt: 1,
       });
 
+    const enrichedMessages = await enrichMessagesWithFiles(messages);
+
     res.status(200).json({
       success: true,
-      messages,
+      messages: enrichedMessages,
     });
   } catch (error) {
     console.error("Get messages error:", error);

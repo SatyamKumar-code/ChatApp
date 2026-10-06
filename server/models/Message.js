@@ -30,8 +30,36 @@ const messageSchema = new mongoose.Schema(
 
     messageType: {
       type: String,
-      enum: ["text", "image", "file", "audio", "system", "call"],
+      enum: ["text", "image", "video", "document", "file", "audio", "system", "call"],
       default: "text",
+    },
+
+    fileId: {
+      type: String,
+      default: "",
+      index: true,
+    },
+
+    fileTransferStatus: {
+      type: String,
+      enum: [
+        "uploading",
+        "uploaded",
+        "pending_delivery",
+        "downloading",
+        "downloaded",
+        "failed",
+        "expired",
+        "unavailable",
+        null,
+      ],
+      default: null,
+    },
+
+    fileModelRef: {
+      type: String,
+      enum: ["Image", "Video", "Document", null],
+      default: null,
     },
 
     callDetails: {
