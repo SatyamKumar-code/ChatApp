@@ -1,0 +1,90 @@
+name: CI Pipeline (Tests & Build)
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - develop
+      - dev
+  pull_request:
+    branches:
+      - main
+      - master
+      - develop
+      - dev
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # -----------------------------------------------------------
+  # 1. Backend (Server) Tests
+  # -----------------------------------------------------------
+  server-tests:
+    name: Backend Tests (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [20.x, 22.x]
+
+    defaults:
+      run:
+        working-directory: server
+
+    env:
+      NODE_ENV: test
+      JWT_ACCESS_SECRET: github-actions-test-access-secret-32
+      JWT_REFRESH_SECRET: github-actions-test-refresh-secret-32
+      FILE_ENCRYPTION_KEY: github-actions-file-encryption-secret-32
+      FILE_RETENTION_HOURS: 240
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🟢 Set up Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+          cache-dependency-path: server/package-lock.json
+
+      - name: 📦 Install server dependencies
+        run: npm ci
+
+      - name: 🧪 Run backend unit tests
+        run: npm test
+
+  # -----------------------------------------------------------
+  # 2. Frontend (Client) Tests & Build
+  # -----------------------------------------------------------
+  client-tests-and-build:
+    name: Frontend Tests & Build (Node 20.x)
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: client
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🟢 Set up Node.js 20.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: 'npm'
+          cache-dependency-path: client/package-lock.json
+
+      - name: 📦 Install client dependencies
+        run: npm ci
+
+      - name: 🧪 Run frontend unit tests (Vitest)
+        run: npm test
+
+      - name: 🏗️ Build client production bundle
+        run: npm run build

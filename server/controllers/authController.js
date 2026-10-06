@@ -5,11 +5,12 @@ import { generateAccessToken, generateRefreshToken } from '../utils/generateToke
 import { isUserOnline } from '../socket/socketServer.js';
 
 
-const isProduction =
+const isProduction = Boolean(
     process.env.NODE_ENV === "production" ||
     process.env.RENDER === "true" ||
-    Boolean(process.env.RENDER) ||
-    (process.env.CLIENT_URL && process.env.CLIENT_URL.startsWith("https://"));
+    process.env.RENDER ||
+    (process.env.CLIENT_URL && process.env.CLIENT_URL.startsWith("https://"))
+);
 
 const cookieOptions = {
     httpOnly: true,

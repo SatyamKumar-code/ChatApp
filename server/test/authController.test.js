@@ -59,6 +59,7 @@ const expectedCookieBase = {
     httpOnly: true,
     secure: false,
     sameSite: 'lax',
+    path: '/',
 };
 
 // ─── Import real helpers we'll use in assertions ─────────────────────────────
@@ -306,8 +307,8 @@ describe('logoutUser', () => {
             },
         };
 
-        const req = buildReq();
-        const res = buildRes({ user: fakeUser });
+        const req = buildReq({ user: fakeUser });
+        const res = buildRes();
         await logoutUser(req, res);
 
         assert.equal(saveCalled, true);
