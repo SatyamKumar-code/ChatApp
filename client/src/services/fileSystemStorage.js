@@ -90,6 +90,24 @@ export const getCategorySubfolder = (category) => {
   return "ChatApp_document";
 };
 
+export const MOBILE_DEFAULT_ROOT = "/storage/emulated/0/ChatApp";
+export const PC_DEFAULT_ROOT = "C:\\Users\\satya\\Downloads\\ChatApp";
+
+export const isMobileDevice = () => {
+  if (typeof navigator === "undefined") return false;
+  const ua = (navigator.userAgent || "").toLowerCase();
+  const platform = (navigator.platform || "").toLowerCase();
+  return (
+    /android|iphone|ipad|ipod/i.test(ua) ||
+    /android/i.test(platform) ||
+    (platform === "macintel" && typeof navigator.maxTouchPoints === "number" && navigator.maxTouchPoints > 1)
+  );
+};
+
+export const getDefaultStorageRoot = () => {
+  return isMobileDevice() ? MOBILE_DEFAULT_ROOT : PC_DEFAULT_ROOT;
+};
+
 /**
  * Get complete logical path: ChatApp/<Send|Received>/<ChatApp_subfolder>/<fileName>
  */
@@ -99,6 +117,20 @@ export const getLogicalPath = ({ fileName, fileType, mimeType, direction = "Rece
   const subFolder = getCategorySubfolder(category);
   const dir = direction === "Send" ? "Send" : "Received";
   return `ChatApp/${dir}/${subFolder}/${safeName}`;
+};
+
+/**
+ * Get device-specific logical path:
+ * Mobile: /storage/emulated/0/ChatApp/<Send|Received>/<ChatApp_subfolder>/<fileName>
+ * PC: C:\Users\satya\Downloads\ChatApp\<Send|Received>\<ChatApp_subfolder>\<fileName>
+ */
+export const getDeviceLogicalPath = ({ fileName, fileType, mimeType, direction = "Received" }) => {
+  const safeName = sanitizeFileName(fileName);
+  const category = getFileCategory(fileType, mimeType, safeName);
+  const subFolder = getCategorySubfolder(category);
+  const dir = direction === "Send" ? "Send" : "Received";
+  const root = getDefaultStorageRoot();
+  return `${root}/${dir}/${subFolder}/${safeName}`;
 };
 
 /**
@@ -127,7 +159,7 @@ const getHandleDB = () => {
       req.onsuccess = () => {
         cachedHandleDb = req.result;
         cachedHandleDb.onversionchange = () => {
-          try { cachedHandleDb.close(); } catch {}
+          try { cachedHandleDb.close(); } catch { }
           cachedHandleDb = null;
           handleDbPromise = null;
         };
@@ -248,7 +280,55 @@ export const verifyPermission = async (fileHandle, readWrite = true) => {
 };
 
 /**
+ * Automatically create ChatApp and all Send & Received subfolders on disk:
+ * ChatApp/
+ * ├── Send/
+ * │   ├── ChatApp_image/
+ * │   ├── ChatApp_video/
+ * │   └── ChatApp_document/
+ * └── Received/
+ *     ├── ChatApp_image/
+ *     ├── ChatApp_video/
+ *     └── ChatApp_document/
+ */
+export const ensureChatAppDirectoryTree = async (rootHandle) => {
+  if (!rootHandle) return null;
+  try {
+    let chatAppDir = rootHandle;
+    if (rootHandle.name.toLowerCase() !== "chatapp") {
+      chatAppDir = await rootHandle.getDirectoryHandle("ChatApp", { create: true });
+    }
+
+    // 1. Create Send folder and subfolders
+    const sendDir = await chatAppDir.getDirectoryHandle("Send", { create: true });
+    await sendDir.getDirectoryHandle("ChatApp_image", { create: true });
+    await sendDir.getDirectoryHandle("ChatApp_video", { create: true });
+    await sendDir.getDirectoryHandle("ChatApp_document", { create: true });
+
+    // 2. Create Received folder and subfolders
+    const recDir = await chatAppDir.getDirectoryHandle("Received", { create: true });
+    await recDir.getDirectoryHandle("ChatApp_image", { create: true });
+    await recDir.getDirectoryHandle("ChatApp_video", { create: true });
+    await recDir.getDirectoryHandle("ChatApp_document", { create: true });
+
+    return chatAppDir;
+  } catch (err) {
+    console.error("[FileSystemStorage] Error ensuring directory tree:", err);
+    return null;
+  }
+};
+
+/**
+ * Check if a directory handle is currently stored
+ */
+export const hasStoredDirectoryHandle = async () => {
+  const handle = await getStoredDirectoryHandle();
+  return Boolean(handle);
+};
+
+/**
  * Prompt user to select directory for ChatApp storage
+ * Starts directly in "downloads" folder on PC and immediately creates the full folder structure.
  */
 export const promptSelectChatAppDirectory = async () => {
   if (!isFileSystemAccessSupported()) {
@@ -265,6 +345,9 @@ export const promptSelectChatAppDirectory = async () => {
     if (!hasPerm) {
       throw new Error("Permission to write to directory was denied");
     }
+
+    // Immediately create ChatApp and all Send / Received subfolders in the selected directory
+    await ensureChatAppDirectoryTree(handle);
 
     await saveStoredDirectoryHandle(handle);
     return handle;

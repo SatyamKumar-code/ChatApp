@@ -10,6 +10,11 @@
 
 import {
   getLogicalPath,
+  getDeviceLogicalPath,
+  MOBILE_DEFAULT_ROOT,
+  PC_DEFAULT_ROOT,
+  getDefaultStorageRoot,
+  isMobileDevice,
   getFileCategory,
   getCategorySubfolder,
   sanitizeFileName,
@@ -17,6 +22,8 @@ import {
   triggerBrowserDownload,
   isFileSystemAccessSupported,
 } from "./fileSystemStorage.js";
+
+export { MOBILE_DEFAULT_ROOT, PC_DEFAULT_ROOT, getDefaultStorageRoot, isMobileDevice };
 
 const DB_NAME = "ChatApp_LocalFiles_v1";
 const STORE_NAME = "files";
@@ -87,6 +94,15 @@ export const getDB = () => {
  */
 export const getLocalPCPath = (fileName, fileType, direction = "Received") => {
   return getLogicalPath({ fileName, fileType, direction });
+};
+
+/**
+ * Get device-specific local storage path:
+ * Mobile: /storage/emulated/0/ChatApp/<Send|Received>/ChatApp_<image|video|document>/<fileName>
+ * PC: C:\Users\satya\Downloads\ChatApp\<Send|Received>\<ChatApp_subfolder>\<fileName>
+ */
+export const getLocalDevicePath = (fileName, fileType, direction = "Received") => {
+  return getDeviceLogicalPath({ fileName, fileType, direction });
 };
 
 /**

@@ -21,6 +21,10 @@ import {
     triggerDeviceDownload,
     getLocalPCPath,
 } from "../services/localFileRegistry";
+import {
+    hasStoredDirectoryHandle,
+    promptSelectChatAppDirectory,
+} from "../services/fileSystemStorage";
 
 export const ChatContext = createContext();
 
@@ -1592,6 +1596,18 @@ const ChatProvider = ({ children }) => {
             console.warn("Error checking existing local file:", e);
         }
 
+        // On PC desktop, if no directory handle is linked yet, prompt user once to link Downloads folder so ChatApp folder is created
+        if (typeof window !== "undefined" && typeof window.showDirectoryPicker === "function") {
+            try {
+                const hasHandle = await hasStoredDirectoryHandle();
+                if (!hasHandle) {
+                    await promptSelectChatAppDirectory();
+                }
+            } catch (e) {
+                // User dismissed or cancelled directory picker, will fall back to browser download
+            }
+        }
+
         setFileTransfers((prev) => ({
             ...prev,
             [fileId]: {
@@ -1641,13 +1657,9 @@ const ChatProvider = ({ children }) => {
                             direction: "Received",
                         });
 
-                        // 2. Trigger browser download ONLY if not saved to local ChatApp folder structure
-                        // and File System Access API is completely unsupported (e.g. mobile)
+                        // 2. Trigger browser download ONLY if not saved directly to native disk
                         if (!saved?.savedToDisk) {
-                            const hasFsApi = typeof window !== "undefined" && typeof window.showDirectoryPicker === "function";
-                            if (!hasFsApi) {
-                                triggerDeviceDownload(blob, fileName, fileType, "Received");
-                            }
+                            triggerDeviceDownload(blob, fileName, fileType, "Received");
                         }
 
                         // 3. Acknowledge download completion so server deletes temporary encrypted copy!

@@ -5,6 +5,9 @@ import {
   getFileCategory,
   getCategorySubfolder,
   getLogicalPath,
+  getDeviceLogicalPath,
+  MOBILE_DEFAULT_ROOT,
+  PC_DEFAULT_ROOT,
   resolveUniqueFileName,
 } from '../services/fileSystemStorage.js';
 
@@ -111,6 +114,56 @@ describe('Local File Registry & File System Storage Service', () => {
 
       const resolved = await resolveUniqueFileName(mockDirHandle, 'unique_doc.pdf');
       expect(resolved).toBe('unique_doc.pdf');
+    });
+  });
+
+  describe('Device-specific default storage roots (Mobile vs PC)', () => {
+    it('defines /storage/emulated/0/ChatApp as default Mobile storage root', () => {
+      expect(MOBILE_DEFAULT_ROOT).toBe('/storage/emulated/0/ChatApp');
+    });
+
+    it('defines C:\\Users\\satya\\Downloads\\ChatApp as default PC storage root', () => {
+      expect(PC_DEFAULT_ROOT).toBe('C:\\Users\\satya\\Downloads\\ChatApp');
+    });
+
+    it('resolves correct device logical path for mobile', () => {
+      const origUa = navigator.userAgent;
+      Object.defineProperty(navigator, 'userAgent', {
+        value: 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36',
+        configurable: true,
+      });
+
+      const path = getDeviceLogicalPath({
+        fileName: 'vacation.jpg',
+        fileType: 'image',
+        direction: 'Received',
+      });
+      expect(path).toBe('/storage/emulated/0/ChatApp/Received/ChatApp_image/vacation.jpg');
+
+      Object.defineProperty(navigator, 'userAgent', {
+        value: origUa,
+        configurable: true,
+      });
+    });
+
+    it('resolves correct device logical path for PC desktop', () => {
+      const origUa = navigator.userAgent;
+      Object.defineProperty(navigator, 'userAgent', {
+        value: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0',
+        configurable: true,
+      });
+
+      const path = getDeviceLogicalPath({
+        fileName: 'report.pdf',
+        fileType: 'document',
+        direction: 'Send',
+      });
+      expect(path).toBe('C:\\Users\\satya\\Downloads\\ChatApp/Send/ChatApp_document/report.pdf');
+
+      Object.defineProperty(navigator, 'userAgent', {
+        value: origUa,
+        configurable: true,
+      });
     });
   });
 });

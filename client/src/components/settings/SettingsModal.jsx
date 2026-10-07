@@ -10,6 +10,9 @@ import {
     promptSelectChatAppDirectory,
     getStoredDirectoryHandle,
     clearStoredDirectoryHandle,
+    MOBILE_DEFAULT_ROOT,
+    PC_DEFAULT_ROOT,
+    isMobileDevice,
 } from "../../services/fileSystemStorage";
 import { getLocalFileStats } from "../../services/localFileRegistry";
 
@@ -180,11 +183,10 @@ export const SettingsModal = ({ isOpen, onClose }) => {
                 <div className="flex md:flex-col gap-1 overflow-x-auto md:w-44 shrink-0 pb-2 md:pb-0 border-b md:border-b-0 md:border-r border-white/10 pr-0 md:pr-4">
                     <button
                         onClick={() => setActiveTab("profile")}
-                        className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-medium transition-all ${
-                            activeTab === "profile"
+                        className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-medium transition-all ${activeTab === "profile"
                                 ? "bg-purple-600/20 text-purple-300 font-semibold border border-purple-500/30"
                                 : "text-zinc-400 hover:text-white hover:bg-white/5"
-                        }`}
+                            }`}
                     >
                         <svg
                             xmlns="http://www.w3.org/2000/svg"
@@ -205,11 +207,10 @@ export const SettingsModal = ({ isOpen, onClose }) => {
 
                     <button
                         onClick={() => setActiveTab("appearance")}
-                        className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-medium transition-all ${
-                            activeTab === "appearance"
+                        className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-medium transition-all ${activeTab === "appearance"
                                 ? "bg-purple-600/20 text-purple-300 font-semibold border border-purple-500/30"
                                 : "text-zinc-400 hover:text-white hover:bg-white/5"
-                        }`}
+                            }`}
                     >
                         <svg
                             xmlns="http://www.w3.org/2000/svg"
@@ -230,11 +231,10 @@ export const SettingsModal = ({ isOpen, onClose }) => {
 
                     <button
                         onClick={() => setActiveTab("privacy")}
-                        className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-medium transition-all ${
-                            activeTab === "privacy"
+                        className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-medium transition-all ${activeTab === "privacy"
                                 ? "bg-purple-600/20 text-purple-300 font-semibold border border-purple-500/30"
                                 : "text-zinc-400 hover:text-white hover:bg-white/5"
-                        }`}
+                            }`}
                     >
                         <svg
                             xmlns="http://www.w3.org/2000/svg"
@@ -255,11 +255,10 @@ export const SettingsModal = ({ isOpen, onClose }) => {
 
                     <button
                         onClick={() => setActiveTab("notifications")}
-                        className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-medium transition-all ${
-                            activeTab === "notifications"
+                        className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-medium transition-all ${activeTab === "notifications"
                                 ? "bg-purple-600/20 text-purple-300 font-semibold border border-purple-500/30"
                                 : "text-zinc-400 hover:text-white hover:bg-white/5"
-                        }`}
+                            }`}
                     >
                         <svg
                             xmlns="http://www.w3.org/2000/svg"
@@ -280,11 +279,10 @@ export const SettingsModal = ({ isOpen, onClose }) => {
 
                     <button
                         onClick={() => setActiveTab("account")}
-                        className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-medium transition-all ${
-                            activeTab === "account"
+                        className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-medium transition-all ${activeTab === "account"
                                 ? "bg-purple-600/20 text-purple-300 font-semibold border border-purple-500/30"
                                 : "text-zinc-400 hover:text-white hover:bg-white/5"
-                        }`}
+                            }`}
                     >
                         <svg
                             xmlns="http://www.w3.org/2000/svg"
@@ -313,11 +311,10 @@ export const SettingsModal = ({ isOpen, onClose }) => {
                     <button
                         type="button"
                         onClick={() => setActiveTab("storage")}
-                        className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-medium transition-all cursor-pointer ${
-                            activeTab === "storage"
+                        className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-medium transition-all cursor-pointer ${activeTab === "storage"
                                 ? "bg-purple-600/20 text-purple-300 font-semibold border border-purple-500/30"
                                 : "text-zinc-400 hover:text-white hover:bg-white/5"
-                        }`}
+                            }`}
                     >
                         <svg
                             xmlns="http://www.w3.org/2000/svg"
@@ -342,11 +339,10 @@ export const SettingsModal = ({ isOpen, onClose }) => {
                         <button
                             type="button"
                             onClick={() => setActiveTab("downloadApp")}
-                            className={`flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium transition-all cursor-pointer ${
-                                activeTab === "downloadApp"
+                            className={`flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium transition-all cursor-pointer ${activeTab === "downloadApp"
                                     ? "bg-purple-600/20 text-purple-300 font-semibold border border-purple-500/30"
                                     : "text-zinc-400 hover:text-white hover:bg-white/5"
-                            }`}
+                                }`}
                         >
                             <div className="flex items-center gap-2.5">
                                 <svg
@@ -512,8 +508,8 @@ export const SettingsModal = ({ isOpen, onClose }) => {
                                         {themeMode === THEME_MODES.SYSTEM
                                             ? `System default (${resolvedTheme})`
                                             : themeMode === THEME_MODES.LIGHT
-                                            ? "Light mode"
-                                            : "Dark mode"}
+                                                ? "Light mode"
+                                                : "Dark mode"}
                                     </span>
                                 </div>
                                 <div className="grid grid-cols-3 gap-2.5">
@@ -521,11 +517,10 @@ export const SettingsModal = ({ isOpen, onClose }) => {
                                     <button
                                         type="button"
                                         onClick={() => changeThemeMode(THEME_MODES.SYSTEM)}
-                                        className={`p-3 rounded-xl border flex flex-col items-center justify-center gap-2 transition-all cursor-pointer ${
-                                            themeMode === THEME_MODES.SYSTEM
+                                        className={`p-3 rounded-xl border flex flex-col items-center justify-center gap-2 transition-all cursor-pointer ${themeMode === THEME_MODES.SYSTEM
                                                 ? "bg-purple-600/15 border-purple-500 shadow-md ring-1 ring-purple-500 text-purple-300 font-semibold"
                                                 : "bg-[#181830] border-white/5 hover:border-white/20 text-zinc-300"
-                                        }`}
+                                            }`}
                                     >
                                         <div className="w-8 h-8 rounded-lg bg-purple-500/20 flex items-center justify-center text-purple-400">
                                             <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -542,11 +537,10 @@ export const SettingsModal = ({ isOpen, onClose }) => {
                                     <button
                                         type="button"
                                         onClick={() => changeThemeMode(THEME_MODES.DARK)}
-                                        className={`p-3 rounded-xl border flex flex-col items-center justify-center gap-2 transition-all cursor-pointer ${
-                                            themeMode === THEME_MODES.DARK
+                                        className={`p-3 rounded-xl border flex flex-col items-center justify-center gap-2 transition-all cursor-pointer ${themeMode === THEME_MODES.DARK
                                                 ? "bg-purple-600/15 border-purple-500 shadow-md ring-1 ring-purple-500 text-purple-300 font-semibold"
                                                 : "bg-[#181830] border-white/5 hover:border-white/20 text-zinc-300"
-                                        }`}
+                                            }`}
                                     >
                                         <div className="w-8 h-8 rounded-lg bg-indigo-500/20 flex items-center justify-center text-indigo-400">
                                             <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -563,11 +557,10 @@ export const SettingsModal = ({ isOpen, onClose }) => {
                                     <button
                                         type="button"
                                         onClick={() => changeThemeMode(THEME_MODES.LIGHT)}
-                                        className={`p-3 rounded-xl border flex flex-col items-center justify-center gap-2 transition-all cursor-pointer ${
-                                            themeMode === THEME_MODES.LIGHT
+                                        className={`p-3 rounded-xl border flex flex-col items-center justify-center gap-2 transition-all cursor-pointer ${themeMode === THEME_MODES.LIGHT
                                                 ? "bg-purple-600/15 border-purple-500 shadow-md ring-1 ring-purple-500 text-purple-300 font-semibold"
                                                 : "bg-[#181830] border-white/5 hover:border-white/20 text-zinc-300"
-                                        }`}
+                                            }`}
                                     >
                                         <div className="w-8 h-8 rounded-lg bg-amber-500/20 flex items-center justify-center text-amber-400">
                                             <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -597,16 +590,15 @@ export const SettingsModal = ({ isOpen, onClose }) => {
                                                 style={
                                                     isSelected
                                                         ? {
-                                                              borderColor: item.color,
-                                                              boxShadow: `0 0 0 1.5px ${item.color}, 0 4px 12px ${item.color}35`,
-                                                          }
+                                                            borderColor: item.color,
+                                                            boxShadow: `0 0 0 1.5px ${item.color}, 0 4px 12px ${item.color}35`,
+                                                        }
                                                         : undefined
                                                 }
-                                                className={`p-3 rounded-xl border flex items-center gap-3 transition-all cursor-pointer text-left ${
-                                                    isSelected
+                                                className={`p-3 rounded-xl border flex items-center gap-3 transition-all cursor-pointer text-left ${isSelected
                                                         ? "bg-white/10"
                                                         : "bg-[#181830] border-white/5 hover:border-white/20"
-                                                }`}
+                                                    }`}
                                             >
                                                 <div
                                                     className="w-5 h-5 rounded-full shrink-0 shadow-sm flex items-center justify-center text-white text-[10px] font-bold"
@@ -639,11 +631,9 @@ export const SettingsModal = ({ isOpen, onClose }) => {
                                     <div
                                         className="chat-bubble-outgoing self-end max-w-[80%] px-3.5 py-2 rounded-2xl rounded-br-sm text-xs font-medium shadow-md transition-all duration-300"
                                         style={{
-                                            background: `linear-gradient(135deg, ${
-                                                ACCENT_PALETTES?.[accentColor]?.color || accentColor
-                                            }, ${
-                                                ACCENT_PALETTES?.[accentColor]?.endColor || "#4f46e5"
-                                            })`,
+                                            background: `linear-gradient(135deg, ${ACCENT_PALETTES?.[accentColor]?.color || accentColor
+                                                }, ${ACCENT_PALETTES?.[accentColor]?.endColor || "#4f46e5"
+                                                })`,
                                             boxShadow: `0 4px 14px ${accentColor}40`,
                                             color: "#ffffff",
                                         }}
@@ -670,14 +660,12 @@ export const SettingsModal = ({ isOpen, onClose }) => {
                                 <button
                                     type="button"
                                     onClick={handleOnlineVisibleToggle}
-                                    className={`w-11 h-6 rounded-full transition-colors relative ${
-                                        onlineVisible ? "bg-purple-600" : "bg-zinc-700"
-                                    }`}
+                                    className={`w-11 h-6 rounded-full transition-colors relative ${onlineVisible ? "bg-purple-600" : "bg-zinc-700"
+                                        }`}
                                 >
                                     <span
-                                        className={`absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${
-                                            onlineVisible ? "translate-x-5" : ""
-                                        }`}
+                                        className={`absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${onlineVisible ? "translate-x-5" : ""
+                                            }`}
                                     />
                                 </button>
                             </div>
@@ -694,14 +682,12 @@ export const SettingsModal = ({ isOpen, onClose }) => {
                                 <button
                                     type="button"
                                     onClick={handleReceiptsToggle}
-                                    className={`w-11 h-6 rounded-full transition-colors relative ${
-                                        readReceipts ? "bg-purple-600" : "bg-zinc-700"
-                                    }`}
+                                    className={`w-11 h-6 rounded-full transition-colors relative ${readReceipts ? "bg-purple-600" : "bg-zinc-700"
+                                        }`}
                                 >
                                     <span
-                                        className={`absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${
-                                            readReceipts ? "translate-x-5" : ""
-                                        }`}
+                                        className={`absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${readReceipts ? "translate-x-5" : ""
+                                            }`}
                                     />
                                 </button>
                             </div>
@@ -746,14 +732,12 @@ export const SettingsModal = ({ isOpen, onClose }) => {
                                     <button
                                         type="button"
                                         onClick={handleSoundToggle}
-                                        className={`w-11 h-6 rounded-full transition-colors relative ${
-                                            soundEnabled ? "bg-purple-600" : "bg-zinc-700"
-                                        }`}
+                                        className={`w-11 h-6 rounded-full transition-colors relative ${soundEnabled ? "bg-purple-600" : "bg-zinc-700"
+                                            }`}
                                     >
                                         <span
-                                            className={`absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${
-                                                soundEnabled ? "translate-x-5" : ""
-                                            }`}
+                                            className={`absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${soundEnabled ? "translate-x-5" : ""
+                                                }`}
                                         />
                                     </button>
                                 </div>
@@ -806,127 +790,194 @@ export const SettingsModal = ({ isOpen, onClose }) => {
                     )}
 
                     {/* ===== 5B. STORAGE & FILES TAB ===== */}
-                    {activeTab === "storage" && (
-                        <div className="space-y-4">
-                            <div className="bg-[#181830] p-4 rounded-xl border border-white/5 space-y-3">
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-2.5">
-                                        <div className="w-8 h-8 rounded-lg bg-cyan-500/20 text-cyan-300 flex items-center justify-center">
-                                            <svg
-                                                xmlns="http://www.w3.org/2000/svg"
-                                                className="w-4 h-4"
-                                                fill="none"
-                                                viewBox="0 0 24 24"
-                                                stroke="currentColor"
-                                            >
-                                                <path
-                                                    strokeLinecap="round"
-                                                    strokeLinejoin="round"
-                                                    strokeWidth={2}
-                                                    d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
-                                                />
-                                            </svg>
-                                        </div>
-                                        <div>
-                                            <h4 className="text-xs font-semibold text-white">Local Directory Structure</h4>
-                                            <p className="text-[11px] text-zinc-400">Automatic organization for Sent & Received files</p>
-                                        </div>
-                                    </div>
+                    {activeTab === "storage" && (() => {
+                        const isMobile =
+                            os === "android" ||
+                            os === "ios" ||
+                            isMobileDevice();
 
-                                    <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${
-                                        fsSupported && directoryHandle
-                                            ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
-                                            : "bg-purple-500/10 text-purple-300 border-purple-500/30"
-                                    }`}>
-                                        {fsSupported && directoryHandle ? "Native FS Linked" : "Browser Downloads"}
-                                    </span>
-                                </div>
+                        const rootDisplayPath = isMobile
+                            ? MOBILE_DEFAULT_ROOT
+                            : (directoryHandle ? directoryHandle.name : PC_DEFAULT_ROOT);
 
-                                {/* Folder Layout Diagram */}
-                                <div className="p-3 rounded-lg bg-black/30 font-mono text-[11px] text-zinc-300 border border-white/5 space-y-1">
-                                    <div className="text-cyan-300 font-bold">ChatApp/</div>
-                                    <div className="pl-4 text-purple-300">├── Send/</div>
-                                    <div className="pl-8 text-zinc-400">├── ChatApp_image/</div>
-                                    <div className="pl-8 text-zinc-400">├── ChatApp_video/</div>
-                                    <div className="pl-8 text-zinc-400">└── ChatApp_document/</div>
-                                    <div className="pl-4 text-emerald-300">└── Received/</div>
-                                    <div className="pl-8 text-zinc-400">├── ChatApp_image/</div>
-                                    <div className="pl-8 text-zinc-400">├── ChatApp_video/</div>
-                                    <div className="pl-8 text-zinc-400">└── ChatApp_document/</div>
-                                </div>
-
-                                {storageStatusMsg && (
-                                    <div className="p-2 rounded-lg bg-purple-600/20 text-purple-200 text-xs border border-purple-500/30">
-                                        {storageStatusMsg}
-                                    </div>
-                                )}
-
-                                {/* File System Access API controls */}
-                                {fsSupported ? (
-                                    <div className="pt-1 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
-                                        <div>
-                                            <div className="text-xs text-white font-medium">
-                                                {directoryHandle
-                                                    ? `Connected Folder: "${directoryHandle.name}"`
-                                                    : "No custom folder selected"}
-                                            </div>
-                                            <p className="text-[11px] text-zinc-400">
-                                                {directoryHandle
-                                                    ? "Files automatically save to Send & Received subfolders."
-                                                    : "Select a folder to enable direct native disk saving."}
-                                            </p>
-                                        </div>
-
-                                        <div className="flex items-center gap-2 shrink-0">
-                                            <button
-                                                type="button"
-                                                onClick={handleSelectDirectory}
-                                                className="px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-xs font-medium transition-all shadow-sm"
-                                            >
-                                                {directoryHandle ? "Change Folder" : "Select ChatApp Folder"}
-                                            </button>
-                                            {directoryHandle && (
-                                                <button
-                                                    type="button"
-                                                    onClick={handleDisconnectDirectory}
-                                                    className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium transition-all border border-white/10"
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-[#181830] p-4 rounded-xl border border-white/5 space-y-3">
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-2.5">
+                                            <div className="w-8 h-8 rounded-lg bg-cyan-500/20 text-cyan-300 flex items-center justify-center">
+                                                <svg
+                                                    xmlns="http://www.w3.org/2000/svg"
+                                                    className="w-4 h-4"
+                                                    fill="none"
+                                                    viewBox="0 0 24 24"
+                                                    stroke="currentColor"
                                                 >
-                                                    Disconnect
-                                                </button>
+                                                    <path
+                                                        strokeLinecap="round"
+                                                        strokeLinejoin="round"
+                                                        strokeWidth={2}
+                                                        d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
+                                                    />
+                                                </svg>
+                                            </div>
+                                            <div>
+                                                <h4 className="text-xs font-semibold text-white">
+                                                    {isMobile ? "Mobile Internal Storage" : "Local Storage Location"}
+                                                </h4>
+                                                <p className="text-[11px] text-zinc-400">
+                                                    {isMobile
+                                                        ? "Automatic organization in Internal Storage"
+                                                        : "Automatic organization for Sent & Received files"}
+                                                </p>
+                                            </div>
+                                        </div>
+
+                                        <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${isMobile
+                                                ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                                                : directoryHandle
+                                                    ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                                                    : "bg-cyan-500/10 text-cyan-300 border-cyan-500/30"
+                                            }`}>
+                                            {isMobile
+                                                ? "Auto Created (/storage/emulated/0)"
+                                                : directoryHandle
+                                                    ? "Custom Folder Linked"
+                                                    : "Default (Downloads\\ChatApp)"}
+                                        </span>
+                                    </div>
+
+                                    {/* Active Path Box */}
+                                    <div className="p-2.5 rounded-lg bg-black/40 border border-white/10 flex items-center justify-between gap-2">
+                                        <div className="flex items-center gap-2 min-w-0">
+                                            <span className="text-sm">📁</span>
+                                            <div className="min-w-0">
+                                                <div className="text-[10px] text-zinc-400 uppercase tracking-wider font-semibold">
+                                                    {isMobile ? "Default Mobile Storage Location" : "Default PC Location"}
+                                                </div>
+                                                <div className="text-xs font-mono text-cyan-300 truncate font-semibold">
+                                                    {rootDisplayPath}
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <span className="text-[10px] px-2 py-0.5 rounded bg-white/10 text-zinc-300 font-mono shrink-0">
+                                            {isMobile ? "Auto Active" : (directoryHandle ? "Linked" : "Default")}
+                                        </span>
+                                    </div>
+
+                                    {/* Folder Layout Diagram */}
+                                    <div className="p-3 rounded-lg bg-black/30 font-mono text-[11px] text-zinc-300 border border-white/5 space-y-1">
+                                        <div className="text-cyan-300 font-bold truncate">
+                                            {isMobile
+                                                ? "/storage/emulated/0/ChatApp/"
+                                                : (directoryHandle ? `${directoryHandle.name}/` : "C:\\Users\\satya\\Downloads\\ChatApp\\")}
+                                        </div>
+                                        <div className="pl-4 text-purple-300">├── Send/</div>
+                                        <div className="pl-8 text-zinc-400">├── ChatApp_image/</div>
+                                        <div className="pl-8 text-zinc-400">├── ChatApp_video/</div>
+                                        <div className="pl-8 text-zinc-400">└── ChatApp_document/</div>
+                                        <div className="pl-4 text-emerald-300">└── Received/</div>
+                                        <div className="pl-8 text-zinc-400">├── ChatApp_image/</div>
+                                        <div className="pl-8 text-zinc-400">├── ChatApp_video/</div>
+                                        <div className="pl-8 text-zinc-400">└── ChatApp_document/</div>
+                                    </div>
+
+                                    {storageStatusMsg && (
+                                        <div className="p-2 rounded-lg bg-purple-600/20 text-purple-200 text-xs border border-purple-500/30">
+                                            {storageStatusMsg}
+                                        </div>
+                                    )}
+
+                                    {/* Device-specific controls: Mobile stays fixed at /storage/emulated/0/ChatApp; PC allows optional custom folder */}
+                                    {isMobile ? (
+                                        <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-300/90 flex items-start gap-2.5">
+                                            <span className="text-base shrink-0">📱</span>
+                                            <div>
+                                                <div className="font-semibold text-emerald-200">Mobile Auto-Storage Active</div>
+                                                <p className="text-[11px] text-emerald-300/80 mt-0.5 leading-relaxed">
+                                                    On mobile devices, files are automatically created and saved directly into <strong>/storage/emulated/0/ChatApp</strong> under <strong>Send</strong> and <strong>Received</strong> folders. Manual folder selection is disabled as this is auto-managed.
+                                                </p>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="pt-2 space-y-3">
+                                            {directoryHandle ? (
+                                                <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                                                    <div>
+                                                        <div className="text-xs font-semibold text-emerald-300 flex items-center gap-1.5">
+                                                            <span>✅</span> Connected to: "{directoryHandle.name}/ChatApp"
+                                                        </div>
+                                                        <p className="text-[11px] text-emerald-300/80 mt-0.5">
+                                                            Files are automatically saved to Send and Received subfolders on your PC.
+                                                        </p>
+                                                    </div>
+                                                    <div className="flex items-center gap-2 shrink-0">
+                                                        <button
+                                                            type="button"
+                                                            onClick={handleSelectDirectory}
+                                                            className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-medium border border-white/10 transition-all"
+                                                        >
+                                                            Change Folder
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={handleDisconnectDirectory}
+                                                            className="px-3 py-1.5 rounded-lg bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 text-xs font-medium border border-rose-500/30 transition-all"
+                                                        >
+                                                            Disconnect
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <div className="p-3.5 rounded-xl bg-purple-600/15 border border-purple-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                                                    <div>
+                                                        <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                                                            <span>📁</span> Setup C:\Users\satya\Downloads\ChatApp
+                                                        </div>
+                                                        <p className="text-[11px] text-zinc-300 mt-0.5 leading-relaxed">
+                                                            Click the button to select your <strong>Downloads</strong> folder. ChatApp will automatically create the <strong>ChatApp/</strong> folder and all <strong>Send/Received</strong> subfolders on your PC.
+                                                        </p>
+                                                    </div>
+                                                    {fsSupported && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={handleSelectDirectory}
+                                                            className="px-4 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-cyan-600 hover:from-purple-500 hover:to-cyan-500 text-white text-xs font-bold shadow-lg transition-all shrink-0 active:scale-95 cursor-pointer"
+                                                        >
+                                                            Create ChatApp Folder
+                                                        </button>
+                                                    )}
+                                                </div>
                                             )}
                                         </div>
-                                    </div>
-                                ) : (
-                                    <div className="p-2.5 rounded-lg bg-zinc-800/60 border border-white/5 text-xs text-zinc-300">
-                                        Mobile/Browser Mode: Files are saved using the standard browser Downloads mechanism and cached permanently in the local offline registry.
+                                    )}
+                                </div>
+
+                                {/* Storage Statistics Card */}
+                                {storageStats && (
+                                    <div className="bg-[#181830] p-4 rounded-xl border border-white/5 space-y-3">
+                                        <h4 className="text-xs font-semibold text-white">Registry Storage Statistics</h4>
+                                        <div className="grid grid-cols-2 gap-3 text-xs">
+                                            <div className="p-3 rounded-lg bg-black/20 border border-white/5">
+                                                <div className="text-zinc-400 text-[11px]">Total Local Files</div>
+                                                <div className="text-lg font-bold text-white mt-0.5">{storageStats.totalFiles}</div>
+                                                <div className="text-[10px] text-zinc-400 mt-0.5 font-mono">
+                                                    {(storageStats.totalBytes / (1024 * 1024)).toFixed(1)} MB stored
+                                                </div>
+                                            </div>
+                                            <div className="p-3 rounded-lg bg-black/20 border border-white/5">
+                                                <div className="text-zinc-400 text-[11px]">Send vs Received</div>
+                                                <div className="text-xs text-zinc-300 mt-1 space-y-0.5">
+                                                    <div>Send: <span className="text-purple-300 font-semibold">{storageStats.send.count}</span> ({storageStats.send.image} img, {storageStats.send.video} vid, {storageStats.send.document} doc)</div>
+                                                    <div>Received: <span className="text-emerald-300 font-semibold">{storageStats.received.count}</span> ({storageStats.received.image} img, {storageStats.received.video} vid, {storageStats.received.document} doc)</div>
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
                                 )}
                             </div>
-
-                            {/* Storage Statistics Card */}
-                            {storageStats && (
-                                <div className="bg-[#181830] p-4 rounded-xl border border-white/5 space-y-3">
-                                    <h4 className="text-xs font-semibold text-white">Registry Storage Statistics</h4>
-                                    <div className="grid grid-cols-2 gap-3 text-xs">
-                                        <div className="p-3 rounded-lg bg-black/20 border border-white/5">
-                                            <div className="text-zinc-400 text-[11px]">Total Local Files</div>
-                                            <div className="text-lg font-bold text-white mt-0.5">{storageStats.totalFiles}</div>
-                                            <div className="text-[10px] text-zinc-400 mt-0.5 font-mono">
-                                                {(storageStats.totalBytes / (1024 * 1024)).toFixed(1)} MB stored
-                                            </div>
-                                        </div>
-                                        <div className="p-3 rounded-lg bg-black/20 border border-white/5">
-                                            <div className="text-zinc-400 text-[11px]">Send vs Received</div>
-                                            <div className="text-xs text-zinc-300 mt-1 space-y-0.5">
-                                                <div>Send: <span className="text-purple-300 font-semibold">{storageStats.send.count}</span> ({storageStats.send.image} img, {storageStats.send.video} vid, {storageStats.send.document} doc)</div>
-                                                <div>Received: <span className="text-emerald-300 font-semibold">{storageStats.received.count}</span> ({storageStats.received.image} img, {storageStats.received.video} vid, {storageStats.received.document} doc)</div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    )}
+                        );
+                    })()}
 
                     {/* ===== 6. INSTALL / DOWNLOAD APP TAB (Only if NOT installed) ===== */}
                     {!isInstalled && activeTab === "downloadApp" && (
