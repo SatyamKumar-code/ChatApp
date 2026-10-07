@@ -28,16 +28,23 @@ createRoot(document.getElementById('root')).render(
   </StrictMode>
 )
 
-// Register Service Worker for offline app loading
+// Register Service Worker for offline app loading & Web Push
 if (typeof window !== "undefined" && "serviceWorker" in navigator) {
-  window.addEventListener("load", () => {
+  const registerSW = () => {
     navigator.serviceWorker
-      .register("/sw.js")
+      .register("/sw.js", { scope: "/" })
       .then((reg) => {
         console.log("Service Worker registered successfully:", reg.scope);
+        reg.update().catch(() => {});
       })
       .catch((err) => {
         console.warn("Service Worker registration failed:", err);
       });
-  });
+  };
+
+  if (document.readyState === "complete") {
+    registerSW();
+  } else {
+    window.addEventListener("load", registerSW);
+  }
 }

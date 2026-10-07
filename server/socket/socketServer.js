@@ -5,14 +5,16 @@ import Conversation from "../models/Conversation.js";
 import Message from "../models/Message.js";
 import Call from "../models/Call.js";
 import PendingFileDelivery from "../models/PendingFileDelivery.js";
+import PushSubscription from "../models/PushSubscription.js";
 import { deleteTemporaryFile } from "../services/fileStorageService.js";
+import { sendMessagePush, sendCallPush } from "../services/pushService.js";
 
 // Map<userId, Set<socketId>> — supports multiple devices per user
 const onlineUsers = new Map();
 // Map<callPairKey, activeCallInfo>
-const activeCalls = new Map();
+export const activeCalls = new Map();
 // Map<conversationId, activeGroupCallInfo>
-const activeGroupCalls = new Map();
+export const activeGroupCalls = new Map();
 
 const parseCookies = (cookieHeader) => {
   const cookies = {};
@@ -569,6 +571,26 @@ const setupSocket = (io) => {
           }
         }
 
+        // Trigger Web Push Notification for offline or background devices
+        try {
+          const recipientIds = conversation.isGroup
+            ? conversation.participants
+                .filter((pId) => (pId?._id || pId).toString() !== userId)
+                .map((pId) => (pId?._id || pId).toString())
+            : (!isBlockedByReceiver && receiverId ? [receiverId.toString()] : []);
+
+          if (recipientIds.length > 0) {
+            sendMessagePush({
+              sender: socket.user,
+              conversation,
+              message: populatedMessage,
+              recipientIds,
+            }).catch((pErr) => console.error("Send message push error:", pErr));
+          }
+        } catch (pushErr) {
+          console.error("Message push dispatch error:", pushErr);
+        }
+
         console.log(
           `Message sent in ${conversation.isGroup ? "group" : "direct"}: ${conversationId}`
         );
@@ -973,8 +995,9 @@ const setupSocket = (io) => {
         }
 
         const receiverOnline = isUserOnline(receiverId.toString());
+        const pushSubCount = await PushSubscription.countDocuments({ userId: receiverId });
 
-        if (!receiverOnline) {
+        if (!receiverOnline && pushSubCount === 0) {
           // Log missed/offline call attempt
           try {
             const callDoc = await Call.create({
@@ -1028,6 +1051,28 @@ const setupSocket = (io) => {
 
         // Track active call state
         const callKey = getCallKey(userId, receiverId.toString());
+
+        // 40-second timeout if call is unanswered
+        const timeoutId = setTimeout(async () => {
+          const curCall = activeCalls.get(callKey);
+          if (curCall && curCall.callDocId?.toString() === callDocId?.toString() && !curCall.startTime) {
+            activeCalls.delete(callKey);
+            socket.emit("call:rejected", {
+              reason: "no_answer",
+              message: "No answer",
+            });
+            createAndBroadcastCallMessage({
+              conversationId,
+              callerId: socket.user._id,
+              receiverId,
+              callType,
+              status: "missed",
+              duration: 0,
+              isGroupCall: false,
+            });
+          }
+        }, 40000);
+
         activeCalls.set(callKey, {
           callDocId,
           callerId: userId,
@@ -1035,19 +1080,32 @@ const setupSocket = (io) => {
           callType,
           conversationId,
           startTime: null,
+          timeoutId,
         });
 
-        // Send incoming call alert to receiver
-        io.to(`user:${receiverId.toString()}`).emit("call:incoming", {
-          caller: {
-            _id: socket.user._id,
-            name: socket.user.name,
-            profilePicture: socket.user.profilePicture,
-            phone: socket.user.phone,
-          },
+        // Send incoming call alert to receiver over Socket.IO if online
+        if (receiverOnline) {
+          io.to(`user:${receiverId.toString()}`).emit("call:incoming", {
+            caller: {
+              _id: socket.user._id,
+              name: socket.user.name,
+              profilePicture: socket.user.profilePicture,
+              phone: socket.user.phone,
+            },
+            callType,
+            conversationId,
+            callId: callDocId,
+          });
+        }
+
+        // Send high-priority Web Push Notification (wakes closed PWA / background)
+        sendCallPush({
+          caller: socket.user,
+          receiverId,
           callType,
+          callId: callDocId,
           conversationId,
-        });
+        }).catch((err) => console.error("Send call push error:", err));
 
         console.log(`Call initiated: ${socket.user.name} -> ${receiverId} (${callType})`);
       } catch (err) {
@@ -1065,6 +1123,7 @@ const setupSocket = (io) => {
         const callInfo = activeCalls.get(callKey);
 
         if (callInfo) {
+          if (callInfo.timeoutId) clearTimeout(callInfo.timeoutId);
           callInfo.startTime = Date.now();
           if (callInfo.callDocId) {
             await Call.findByIdAndUpdate(callInfo.callDocId, {
@@ -1096,30 +1155,32 @@ const setupSocket = (io) => {
         const callKey = getCallKey(userId, callerId.toString());
         const callInfo = activeCalls.get(callKey);
 
-        if (callInfo && callInfo.callDocId) {
-          await Call.findByIdAndUpdate(callInfo.callDocId, {
-            status: reason === "busy" ? "missed" : "rejected",
-          });
-          const populated = await Call.findById(callInfo.callDocId)
-            .populate("caller", "name phone profilePicture isOnline")
-            .populate("receiver", "name phone profilePicture isOnline");
+        if (callInfo) {
+          if (callInfo.timeoutId) clearTimeout(callInfo.timeoutId);
+          if (callInfo.callDocId) {
+            await Call.findByIdAndUpdate(callInfo.callDocId, {
+              status: reason === "busy" ? "missed" : "rejected",
+            });
+            const populated = await Call.findById(callInfo.callDocId)
+              .populate("caller", "name phone profilePicture isOnline")
+              .populate("receiver", "name phone profilePicture isOnline");
 
-          if (populated) {
-            io.to(`user:${callerId.toString()}`).emit("call:newRecord", populated);
-            io.to(`user:${userId}`).emit("call:newRecord", populated);
+            if (populated) {
+              io.to(`user:${callerId.toString()}`).emit("call:newRecord", populated);
+              io.to(`user:${userId}`).emit("call:newRecord", populated);
+            }
+
+            // Broadcast Call message into Chat
+            createAndBroadcastCallMessage({
+              conversationId: callInfo.conversationId,
+              callerId: callInfo.callerId,
+              receiverId: callInfo.receiverId,
+              callType: callInfo.callType,
+              status: reason === "busy" ? "missed" : "rejected",
+              duration: 0,
+              isGroupCall: false,
+            });
           }
-
-          // Broadcast Call message into Chat
-          createAndBroadcastCallMessage({
-            conversationId: callInfo.conversationId,
-            callerId: callInfo.callerId,
-            receiverId: callInfo.receiverId,
-            callType: callInfo.callType,
-            status: reason === "busy" ? "missed" : "rejected",
-            duration: 0,
-            isGroupCall: false,
-          });
-
           activeCalls.delete(callKey);
         }
 
@@ -1145,6 +1206,7 @@ const setupSocket = (io) => {
         const callInfo = activeCalls.get(callKey);
 
         if (callInfo) {
+          if (callInfo.timeoutId) clearTimeout(callInfo.timeoutId);
           let duration = 0;
           if (callInfo.startTime) {
             duration = Math.max(1, Math.floor((Date.now() - callInfo.startTime) / 1000));
@@ -1598,6 +1660,31 @@ const setupSocket = (io) => {
       socket.on("disconnect", pruneAndMarkOffline);
     });
   });
+};
+
+export const rejectCallFromPush = async ({ callerId, receiverId, callId, reason = "declined" }) => {
+  if (!callerId) return;
+  const u1 = callerId.toString();
+  const u2 = (receiverId || "").toString();
+  const callKey = [u1, u2].sort().join(":");
+  const callInfo = activeCalls.get(callKey);
+  if (callInfo) {
+    if (callInfo.timeoutId) clearTimeout(callInfo.timeoutId);
+    activeCalls.delete(callKey);
+  }
+  if (callId) {
+    try {
+      await Call.findByIdAndUpdate(callId, { status: "rejected" });
+    } catch (e) {}
+  }
+  if (ioInstance) {
+    ioInstance.to(`user:${callerId.toString()}`).emit("call:rejected", {
+      callerId,
+      rejectedBy: receiverId,
+      reason,
+      callId,
+    });
+  }
 };
 
 export {

@@ -820,6 +820,81 @@ export const CallProvider = ({ children }) => {
         createGroupPeerConnection,
     ]);
 
+    // Handle incoming call triggered via Web Push notification when PWA opens
+    useEffect(() => {
+        if (!user) return;
+
+        // 1. Check URL parameters (opened from Push Notification Accept click)
+        const params = new URLSearchParams(window.location.search);
+        const callAction = params.get("callAction");
+        const callerId = params.get("callerId");
+
+        if (callAction === "accept" && callerId) {
+            const cType = params.get("callType") || "video";
+            const cName = params.get("callerName") || "Caller";
+            const cAvatar = params.get("callerAvatar") || "";
+            const convId = params.get("conversationId") || null;
+
+            try {
+                const newUrl = window.location.pathname;
+                window.history.replaceState({}, document.title, newUrl);
+            } catch (e) {}
+
+            const callerObj = {
+                _id: callerId,
+                name: decodeURIComponent(cName),
+                profilePicture: decodeURIComponent(cAvatar),
+            };
+            setRemoteUser(callerObj);
+            setCallType(cType);
+            setConversationId(convId);
+            setIsGroupCall(false);
+            setCallState("incoming");
+
+            // Auto-trigger accept after ensuring socket is ready
+            setTimeout(() => {
+                if (socket.connected) {
+                    acceptCall();
+                } else {
+                    socket.once("connect", () => {
+                        acceptCall();
+                    });
+                    socket.connect();
+                }
+            }, 600);
+        }
+
+        // 2. Listen to Service Worker messages when notification is clicked while window is already open
+        if (typeof window !== "undefined" && "serviceWorker" in navigator) {
+            const handleSwMessage = (event) => {
+                const { type, data, action } = event.data || {};
+                if (type === "NOTIFICATION_CLICKED" && data?.type === "CALL") {
+                    const callerObj = {
+                        _id: data.callerId,
+                        name: data.callerName || "Caller",
+                        profilePicture: data.callerAvatar || "",
+                        phone: data.callerPhone || "",
+                    };
+                    setRemoteUser(callerObj);
+                    setCallType(data.callType || "video");
+                    setConversationId(data.conversationId || null);
+                    setIsGroupCall(false);
+                    if (action === "accept" || !action) {
+                        setCallState("incoming");
+                        setTimeout(() => {
+                            acceptCall();
+                        }, 400);
+                    }
+                }
+            };
+
+            navigator.serviceWorker.addEventListener("message", handleSwMessage);
+            return () => {
+                navigator.serviceWorker.removeEventListener("message", handleSwMessage);
+            };
+        }
+    }, [user, acceptCall]);
+
     const value = {
         callState,
         callType,

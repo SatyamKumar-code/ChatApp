@@ -14,6 +14,7 @@ import {
   calculateExpiresAt,
   temporaryFileExists,
 } from "../services/fileStorageService.js";
+import { sendMessagePush } from "../services/pushService.js";
 
 /**
  * Sanitize filename to prevent directory traversal and illegal characters
@@ -325,6 +326,26 @@ export const uploadFile = async (req, res) => {
           }
         });
       }
+    }
+
+    // Trigger Web Push notification for recipients
+    try {
+      const recipientIds = conversation.isGroup
+        ? conversation.participants
+            .filter((p) => (p?._id || p)?.toString() !== req.user._id.toString())
+            .map((p) => (p?._id || p)?.toString())
+        : (receiverId ? [receiverId.toString()] : []);
+
+      if (recipientIds.length > 0) {
+        sendMessagePush({
+          sender: req.user,
+          conversation,
+          message: msgObj,
+          recipientIds,
+        }).catch((err) => console.error("File message push error:", err));
+      }
+    } catch (e) {
+      console.error("File message push dispatch error:", e);
     }
 
     return res.status(201).json({

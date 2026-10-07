@@ -8,6 +8,7 @@ import ChatHome from "./pages/ChatHome";
 import OfflineStatusIndicator from "./components/common/OfflineStatusIndicator";
 import PwaInstallBanner from "./components/common/PwaInstallBanner";
 import PwaInstallModal from "./components/common/PwaInstallModal";
+import NotificationPromptBanner from "./components/common/NotificationPromptBanner";
 
 function App() {
   return (
@@ -20,6 +21,9 @@ function App() {
 
       {/* Interactive PWA Step-by-Step Installation Modal */}
       <PwaInstallModal />
+
+      {/* Web Push Notification Enable Prompt */}
+      <NotificationPromptBanner />
 
       <Routes>
         {/* Guest-only routes: If already logged in, redirect to "/" */}

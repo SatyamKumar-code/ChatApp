@@ -15,6 +15,16 @@ import {
     isMobileDevice,
 } from "../../services/fileSystemStorage";
 import { getLocalFileStats } from "../../services/localFileRegistry";
+import api from "../../services/api";
+import {
+    isPushSupported,
+    getNotificationPermission,
+    getActiveSubscription,
+    subscribeToPush,
+    unsubscribeFromPush,
+    testPushNotification,
+    testLocalNotification,
+} from "../../services/pushNotificationService";
 
 export const SettingsModal = ({ isOpen, onClose }) => {
     const { user, updateProfile, logout } = useContext(AuthContext);
@@ -56,6 +66,99 @@ export const SettingsModal = ({ isOpen, onClose }) => {
     const [storageStats, setStorageStats] = useState(null);
     const [storageStatusMsg, setStorageStatusMsg] = useState("");
     const fsSupported = isFileSystemAccessSupported();
+
+    // Push notification states
+    const [pushSupported, setPushSupported] = useState(true);
+    const [pushPermission, setPushPermission] = useState("default");
+    const [pushSubscribed, setPushSubscribed] = useState(false);
+    const [pushLoading, setPushLoading] = useState(false);
+    const [pushStatusMsg, setPushStatusMsg] = useState("");
+    const [activeDeviceCount, setActiveDeviceCount] = useState(1);
+
+    const checkPushState = React.useCallback(async () => {
+        const supported = isPushSupported();
+        setPushSupported(supported);
+        if (!supported) return;
+
+        const perm = getNotificationPermission();
+        setPushPermission(perm);
+
+        const sub = await getActiveSubscription();
+        setPushSubscribed(!!sub);
+
+        try {
+            const res = await api.get("/push/status");
+            if (res.data?.success) {
+                setActiveDeviceCount(res.data.activeDeviceCount || (sub ? 1 : 0));
+                if (res.data.isSubscribed && sub) {
+                    setPushSubscribed(true);
+                }
+            }
+        } catch (e) {}
+    }, []);
+
+    React.useEffect(() => {
+        if (isOpen && activeTab === "notifications") {
+            checkPushState();
+        }
+    }, [isOpen, activeTab, checkPushState]);
+
+    const handleEnablePush = async () => {
+        try {
+            setPushLoading(true);
+            setPushStatusMsg("");
+            await subscribeToPush();
+            await checkPushState();
+            setPushStatusMsg("Push notifications enabled! This device will now receive background message and call alerts.");
+        } catch (err) {
+            console.error("Enable push error:", err);
+            setPushStatusMsg(err.message || "Failed to enable push notifications.");
+            setPushPermission(getNotificationPermission());
+        } finally {
+            setPushLoading(false);
+        }
+    };
+
+    const handleDisablePush = async () => {
+        try {
+            setPushLoading(true);
+            setPushStatusMsg("");
+            await unsubscribeFromPush();
+            await checkPushState();
+            setPushStatusMsg("Push notifications disabled on this device.");
+        } catch (err) {
+            console.error("Disable push error:", err);
+            setPushStatusMsg(err.message || "Failed to unsubscribe.");
+        } finally {
+            setPushLoading(false);
+        }
+    };
+
+    const handleSendTestPush = async () => {
+        try {
+            setPushLoading(true);
+            setPushStatusMsg("");
+            await testPushNotification();
+            setPushStatusMsg("Web Push alert sent via server! Check your Windows taskbar / Notification Center.");
+        } catch (err) {
+            setPushStatusMsg("Test notification failed: " + (err.response?.data?.message || err.message));
+        } finally {
+            setPushLoading(false);
+        }
+    };
+
+    const handleSendTestLocal = async () => {
+        try {
+            setPushLoading(true);
+            setPushStatusMsg("");
+            await testLocalNotification();
+            setPushStatusMsg("Local OS toast dispatched directly! If no popup appears, check Windows Settings > System > Notifications (Google Chrome/Edge = ON, Do Not Disturb = OFF).");
+        } catch (err) {
+            setPushStatusMsg("Local toast failed: " + err.message);
+        } finally {
+            setPushLoading(false);
+        }
+    };
 
     React.useEffect(() => {
         if (isOpen && activeTab === "storage") {
@@ -697,13 +800,14 @@ export const SettingsModal = ({ isOpen, onClose }) => {
                     {/* ===== 4. NOTIFICATIONS TAB ===== */}
                     {activeTab === "notifications" && (
                         <div className="space-y-4">
+                            {/* In-App Sounds */}
                             <div className="bg-[#181830] p-4 rounded-xl border border-white/5 flex items-center justify-between gap-4">
                                 <div>
                                     <h4 className="text-sm font-medium text-white">
                                         Chat & Call Sounds
                                     </h4>
                                     <p className="text-xs text-zinc-400 mt-0.5">
-                                        Play chimes for incoming messages and ringtones for calls
+                                        Play chimes for incoming messages and ringtones for calls while app is open
                                     </p>
                                 </div>
                                 <div className="flex items-center gap-3">
@@ -740,6 +844,205 @@ export const SettingsModal = ({ isOpen, onClose }) => {
                                                 }`}
                                         />
                                     </button>
+                                </div>
+                            </div>
+
+                            {/* OS-Level Web Push Notifications (Background & Lock Screen) */}
+                            <div className="bg-[#181830] p-4.5 rounded-2xl border border-purple-500/20 shadow-lg relative overflow-hidden">
+                                <div className="flex items-start justify-between gap-4">
+                                    <div className="flex items-start gap-3">
+                                        <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-purple-600 to-indigo-600 flex items-center justify-center text-white shrink-0 shadow-md shadow-purple-900/30">
+                                            <svg
+                                                xmlns="http://www.w3.org/2000/svg"
+                                                className="w-5 h-5"
+                                                fill="none"
+                                                viewBox="0 0 24 24"
+                                                stroke="currentColor"
+                                            >
+                                                <path
+                                                    strokeLinecap="round"
+                                                    strokeLinejoin="round"
+                                                    strokeWidth={2}
+                                                    d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
+                                                />
+                                            </svg>
+                                        </div>
+                                        <div>
+                                            <div className="flex items-center gap-2">
+                                                <h4 className="text-sm font-semibold text-white">
+                                                    PWA Web Push Notifications
+                                                </h4>
+                                                {pushPermission === "denied" ? (
+                                                    <span className="px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30 text-[10px] font-medium">
+                                                        Permission Blocked
+                                                    </span>
+                                                ) : pushSubscribed ? (
+                                                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-medium flex items-center gap-1">
+                                                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                                                        Active
+                                                    </span>
+                                                ) : (
+                                                    <span className="px-2 py-0.5 rounded-full bg-zinc-700/50 text-zinc-400 text-[10px] font-medium">
+                                                        Disabled
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <p className="text-xs text-zinc-300 mt-1 leading-relaxed">
+                                                Receive real-time message previews and incoming audio/video call alerts at the OS level, even when ChatApp and your browser are completely closed.
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Status details & permission alert */}
+                                {pushPermission === "denied" && (
+                                    <div className="mt-3.5 p-3 rounded-xl bg-rose-950/40 border border-rose-500/30 flex items-start gap-2.5 text-xs text-rose-200">
+                                        <svg
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            className="w-4 h-4 text-rose-400 shrink-0 mt-0.5"
+                                            fill="none"
+                                            viewBox="0 0 24 24"
+                                            stroke="currentColor"
+                                        >
+                                            <path
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                                strokeWidth={2}
+                                                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                                            />
+                                        </svg>
+                                        <div>
+                                            <span className="font-semibold">Notifications are blocked in this browser.</span>
+                                            <p className="text-[11px] text-rose-300/80 mt-0.5">
+                                                To enable, tap the padlock / site settings icon in your browser address bar and set Notifications to "Allow".
+                                            </p>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {pushStatusMsg && (
+                                    <div className="mt-3 p-2.5 rounded-xl bg-purple-950/40 border border-purple-500/30 text-xs text-purple-200 flex items-center justify-between">
+                                        <span>{pushStatusMsg}</span>
+                                        <button
+                                            onClick={() => setPushStatusMsg("")}
+                                            className="text-purple-400 hover:text-white text-xs ml-2"
+                                        >
+                                            ✕
+                                        </button>
+                                    </div>
+                                )}
+
+                                {/* Push Controls */}
+                                <div className="mt-4 pt-3.5 border-t border-white/5 flex flex-wrap items-center justify-between gap-3">
+                                    <div className="text-[11px] text-zinc-400">
+                                        {pushSubscribed ? (
+                                            <span>
+                                                Connected device: <strong className="text-zinc-200">{os === "ios" ? "Apple iOS" : os === "android" ? "Android" : "PC / Web"}</strong> • Subscriptions: {activeDeviceCount}
+                                            </span>
+                                        ) : (
+                                            <span>Browser permission: <strong className="text-zinc-300">{pushPermission}</strong></span>
+                                        )}
+                                    </div>
+
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        {pushSubscribed && (
+                                            <>
+                                                <button
+                                                    type="button"
+                                                    onClick={handleSendTestLocal}
+                                                    disabled={pushLoading}
+                                                    title="Test local Windows toast directly"
+                                                    className="px-3 py-1.5 rounded-xl bg-purple-500/15 hover:bg-purple-500/25 text-purple-200 text-xs font-medium border border-purple-500/30 transition-all flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
+                                                >
+                                                    <svg
+                                                        xmlns="http://www.w3.org/2000/svg"
+                                                        className="w-3.5 h-3.5 text-purple-400"
+                                                        fill="none"
+                                                        viewBox="0 0 24 24"
+                                                        stroke="currentColor"
+                                                    >
+                                                        <path
+                                                            strokeLinecap="round"
+                                                            strokeLinejoin="round"
+                                                            strokeWidth={2}
+                                                            d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+                                                        />
+                                                    </svg>
+                                                    Test OS Toast
+                                                </button>
+
+                                                <button
+                                                    type="button"
+                                                    onClick={handleSendTestPush}
+                                                    disabled={pushLoading}
+                                                    title="Send Web Push through server VAPID to device"
+                                                    className="px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white text-xs font-medium border border-white/10 transition-all flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
+                                                >
+                                                    <svg
+                                                        xmlns="http://www.w3.org/2000/svg"
+                                                        className="w-3.5 h-3.5 text-amber-400"
+                                                        fill="none"
+                                                        viewBox="0 0 24 24"
+                                                        stroke="currentColor"
+                                                    >
+                                                        <path
+                                                            strokeLinecap="round"
+                                                            strokeLinejoin="round"
+                                                            strokeWidth={2}
+                                                            d="M13 10V3L4 14h7v7l9-11h-7z"
+                                                        />
+                                                    </svg>
+                                                    Send Server Push
+                                                </button>
+                                            </>
+                                        )}
+
+                                        {pushSubscribed ? (
+                                            <button
+                                                type="button"
+                                                onClick={handleDisablePush}
+                                                disabled={pushLoading}
+                                                className="px-3 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 text-xs font-medium border border-rose-500/20 transition-all disabled:opacity-50 cursor-pointer"
+                                            >
+                                                {pushLoading ? "Updating..." : "Disable Notifications"}
+                                            </button>
+                                        ) : (
+                                            <button
+                                                type="button"
+                                                onClick={handleEnablePush}
+                                                disabled={pushLoading || pushPermission === "denied"}
+                                                className="px-4 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-semibold shadow-lg shadow-purple-950/40 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 cursor-pointer"
+                                            >
+                                                <svg
+                                                    xmlns="http://www.w3.org/2000/svg"
+                                                    className="w-4 h-4"
+                                                    fill="none"
+                                                    viewBox="0 0 24 24"
+                                                    stroke="currentColor"
+                                                >
+                                                    <path
+                                                        strokeLinecap="round"
+                                                        strokeLinejoin="round"
+                                                        strokeWidth={2}
+                                                        d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
+                                                    />
+                                                </svg>
+                                                {pushLoading ? "Enabling..." : "Enable Notifications"}
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <div className="mt-3.5 p-3 rounded-xl bg-white/[0.03] border border-white/5 text-[11px] text-zinc-400 space-y-1.5">
+                                    <div className="font-medium text-zinc-300 flex items-center gap-1.5">
+                                        <span>💡</span>
+                                        <span>Windows OS Notification Troubleshooting Guide:</span>
+                                    </div>
+                                    <ul className="list-disc list-inside space-y-1 text-zinc-400 pl-1">
+                                        <li>Agar test alert click karne par screen par toast nahi dikhe, to Windows Settings (<kbd className="px-1 py-0.5 rounded bg-white/10 text-zinc-200">Win + I</kbd>) &gt; <strong>System &gt; Notifications</strong> me check karein ki <strong>Google Chrome / Microsoft Edge ON</strong> hai.</li>
+                                        <li>Windows ka <strong>Do Not Disturb (Focus Assist)</strong> OFF hona chahiye, warna Windows notifications ko screen par popup nahi hone deta.</li>
+                                        <li>Desktop PWA install karne ke liye browser address bar me <strong>Install App</strong> icon par click karein.</li>
+                                    </ul>
                                 </div>
                             </div>
                         </div>

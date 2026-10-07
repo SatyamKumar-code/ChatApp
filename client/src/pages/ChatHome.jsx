@@ -98,6 +98,42 @@ export const ChatHome = () => {
         setSearchTerm,
     });
 
+    // Auto-open conversation when launched or focused from a Web Push notification
+    useEffect(() => {
+        if (!conversations || conversations.length === 0) return;
+
+        // 1. Check URL parameters
+        const params = new URLSearchParams(window.location.search);
+        const convId = params.get("conversationId");
+        if (convId) {
+            const target = conversations.find((c) => c._id === convId);
+            if (target) {
+                selectConversation(target);
+                try {
+                    window.history.replaceState({}, document.title, window.location.pathname);
+                } catch (e) {}
+            }
+        }
+
+        // 2. Listen to SW postMessages if window is already open
+        if (typeof window !== "undefined" && "serviceWorker" in navigator) {
+            const handleSwMsg = (event) => {
+                const { type, data } = event.data || {};
+                if (type === "NOTIFICATION_CLICKED" && data?.conversationId) {
+                    const target = conversations.find((c) => c._id === data.conversationId);
+                    if (target) {
+                        selectConversation(target);
+                    }
+                }
+            };
+
+            navigator.serviceWorker.addEventListener("message", handleSwMsg);
+            return () => {
+                navigator.serviceWorker.removeEventListener("message", handleSwMsg);
+            };
+        }
+    }, [conversations, selectConversation]);
+
     // Chat Theme State
     const [currentThemeId, setCurrentThemeId] = useState(() => {
         return localStorage.getItem("chatapp_global_theme") || "default";

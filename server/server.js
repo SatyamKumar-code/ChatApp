@@ -1,7 +1,7 @@
+import 'dotenv/config';
 import express from 'express';
 import http from 'http';
 import cors from 'cors';
-import dotenv from 'dotenv';
 import cookieParser from 'cookie-parser';
 import connectDB from './config/db.js';
 import dns from "node:dns";
@@ -14,6 +14,7 @@ import messageRoutes from './routes/messageRoutes.js';
 import statusRoutes from './routes/statusRoutes.js';
 import callRoutes from './routes/callRoutes.js';
 import fileRoutes from './routes/fileRoutes.js';
+import pushRoutes from './routes/pushRoutes.js';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -31,8 +32,6 @@ dns.setServers([
     "8.8.8.8",
     "8.8.4.4"
 ])
-
-dotenv.config();
 
 const app = express();
 
@@ -84,6 +83,7 @@ app.use("/api/messages", messageRoutes);
 app.use("/api/status", statusRoutes);
 app.use("/api/calls", callRoutes);
 app.use("/api/files", fileRoutes);
+app.use("/api/push", pushRoutes);
 
 app.get("/", (req, res) => {
     res.json({

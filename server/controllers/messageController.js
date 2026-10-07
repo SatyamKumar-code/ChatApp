@@ -5,6 +5,7 @@ import Image from "../models/Image.js";
 import Video from "../models/Video.js";
 import Document from "../models/Document.js";
 import PendingFileDelivery from "../models/PendingFileDelivery.js";
+import { sendMessagePush } from "../services/pushService.js";
 
 export const enrichMessagesWithFiles = async (messages) => {
   if (!messages || messages.length === 0) return [];
@@ -195,6 +196,26 @@ const sendMessage = async (req, res) => {
         select: "text messageType fileName fileUrl sender",
         populate: { path: "sender", select: "name" },
       });
+
+      // Trigger Web Push notification for recipients
+      try {
+        const recipientIds = conversation.isGroup
+          ? conversation.participants
+              .filter((p) => p.toString() !== req.user._id.toString())
+              .map((p) => p.toString())
+          : (receiverId ? [receiverId.toString()] : []);
+
+        if (recipientIds.length > 0) {
+          sendMessagePush({
+            sender: req.user,
+            conversation,
+            message: populatedMessage,
+            recipientIds,
+          }).catch((err) => console.error("Send message push error:", err));
+        }
+      } catch (e) {
+        console.error("Message push dispatch error:", e);
+      }
 
     res.status(201).json({
       success: true,

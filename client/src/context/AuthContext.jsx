@@ -1,5 +1,9 @@
 import { createContext, useEffect, useState } from "react";
 import api from "../services/api";
+import {
+    unsubscribeFromPush,
+    syncPushSubscriptionIfGranted,
+} from "../services/pushNotificationService";
 
 export const AuthContext = createContext();
 
@@ -34,6 +38,7 @@ const AuthProvider = ({ children }) => {
                 try {
                     localStorage.setItem("chatapp_cached_user", JSON.stringify(response.data.user));
                 } catch (e) {}
+                syncPushSubscriptionIfGranted().catch(() => {});
             }
         } catch (error) {
             // ONLY log out / clear user if server explicitly returned 401 unauthenticated.
@@ -91,6 +96,10 @@ const AuthProvider = ({ children }) => {
 
     // Logout user
     const logout = async () => {
+        try {
+            await unsubscribeFromPush().catch(() => {});
+        } catch (e) {}
+
         try {
             await api.post("/auth/logout");
         } finally {
