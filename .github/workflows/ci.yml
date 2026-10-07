@@ -40,6 +40,8 @@ jobs:
       JWT_REFRESH_SECRET: github-actions-test-refresh-secret-32
       FILE_ENCRYPTION_KEY: github-actions-file-encryption-secret-32
       FILE_RETENTION_HOURS: 240
+      VAPID_PUBLIC_KEY: BK88x390k_test_mock_vapid_public_key_github_actions_ci
+      VAPID_PRIVATE_KEY: test_mock_vapid_private_key_github_actions_ci
 
     steps:
       - name: 📥 Checkout repository
@@ -88,3 +90,53 @@ jobs:
 
       - name: 🏗️ Build client production bundle
         run: npm run build
+
+  # -----------------------------------------------------------
+  # 3. Deploy to Render (Executes ONLY if ALL tests and builds pass)
+  # -----------------------------------------------------------
+  deploy-render:
+    name: 🚀 Deploy to Render (Test Gatekeeper)
+    needs: [server-tests, client-tests-and-build]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - name: 🚀 Trigger Render Deploy Hook
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+          RENDER_BACKEND_DEPLOY_HOOK: ${{ secrets.RENDER_BACKEND_DEPLOY_HOOK }}
+          RENDER_FRONTEND_DEPLOY_HOOK: ${{ secrets.RENDER_FRONTEND_DEPLOY_HOOK }}
+        run: |
+          echo "🎉 All backend tests, frontend tests, and production builds have passed successfully!"
+
+          # Use RENDER_DEPLOY_HOOK_URL or fallback to RENDER_BACKEND_DEPLOY_HOOK
+          PRIMARY_HOOK="${RENDER_DEPLOY_HOOK_URL:-${RENDER_BACKEND_DEPLOY_HOOK}}"
+
+          if [ -z "$PRIMARY_HOOK" ]; then
+            echo "::warning ::No Render Deploy Hook secret configured. Skipping deploy trigger."
+            echo "ℹ️ To enable auto-deploy only when tests pass:"
+            echo "  1. Turn OFF 'Auto-Deploy' in your Render service settings."
+            echo "  2. Copy the 'Deploy Hook' URL from Render."
+            echo "  3. Add it as 'RENDER_DEPLOY_HOOK_URL' in GitHub repository Secrets (Settings > Secrets and variables > Actions)."
+            exit 0
+          fi
+
+          echo "Triggering Render deployment..."
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$PRIMARY_HOOK")
+          if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 300 ]; then
+            echo "✅ Render deployment successfully triggered (HTTP $HTTP_STATUS)!"
+          else
+            echo "❌ Failed to trigger Render deployment (HTTP $HTTP_STATUS)"
+            exit 1
+          fi
+
+          # Optional: trigger separate frontend service hook if provided
+          if [ -n "$RENDER_FRONTEND_DEPLOY_HOOK" ]; then
+            echo "Triggering secondary Render frontend deployment..."
+            FE_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$RENDER_FRONTEND_DEPLOY_HOOK")
+            if [ "$FE_STATUS" -ge 200 ] && [ "$FE_STATUS" -lt 300 ]; then
+              echo "✅ Render frontend deployment successfully triggered (HTTP $FE_STATUS)!"
+            else
+              echo "❌ Failed to trigger frontend deployment (HTTP $FE_STATUS)"
+              exit 1
+            fi
+          fi
