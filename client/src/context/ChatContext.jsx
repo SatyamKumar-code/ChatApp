@@ -1625,6 +1625,7 @@ const ChatProvider = ({ children }) => {
         fileSize,
         messageId,
         isUserGesture = false,
+        triggerDownloadDialog = false,
     }) => {
         if (!fileId) return;
 
@@ -1699,7 +1700,30 @@ const ChatProvider = ({ children }) => {
                 xhr.onload = async () => {
                     if (xhr.status === 200) {
                         try {
-                            const blob = xhr.response;
+                            const rawBlob = xhr.response;
+                            const ext = (fileName || "").split(".").pop().toLowerCase();
+                            const mimeMap = {
+                                pdf: "application/pdf",
+                                txt: "text/plain",
+                                html: "text/html",
+                                json: "application/json",
+                                csv: "text/csv",
+                                md: "text/markdown",
+                                png: "image/png",
+                                jpg: "image/jpeg",
+                                jpeg: "image/jpeg",
+                                webp: "image/webp",
+                                mp4: "video/mp4",
+                            };
+                            const detectedMime =
+                                mimeMap[ext] ||
+                                (rawBlob.type && rawBlob.type !== "application/octet-stream"
+                                    ? rawBlob.type
+                                    : "application/octet-stream");
+                            const blob =
+                                rawBlob.type === detectedMime
+                                    ? rawBlob
+                                    : new Blob([rawBlob], { type: detectedMime });
 
                             // 1. Save permanently to local IndexedDB registry & native disk if permitted
                             const saved = await saveLocalFile({
@@ -1708,13 +1732,13 @@ const ChatProvider = ({ children }) => {
                                 blob,
                                 fileName,
                                 fileType,
-                                mimeType: blob.type,
+                                mimeType: detectedMime,
                                 fileSize: blob.size,
                                 direction: "Received",
                             });
 
-                            // 2. Trigger browser download popup ONLY for documents/manual downloads (not auto-downloaded photos)
-                            if (!saved?.savedToDisk && isUserGesture && fileType !== "image") {
+                            // 2. Trigger browser download popup ONLY when explicitly requested (not when viewing inline)
+                            if (!saved?.savedToDisk && triggerDownloadDialog && fileType !== "image") {
                                 triggerDeviceDownload(blob, fileName, fileType, "Received");
                             }
 

@@ -261,10 +261,30 @@ export const getLocalFile = async (fileId) => {
         req.onsuccess = () => {
           const result = req.result;
           if (result && result.blob) {
-            const objectUrl = URL.createObjectURL(result.blob);
+            let blob = result.blob;
+            const ext = (result.fileName || "").split(".").pop().toLowerCase();
+            const mimeMap = {
+              pdf: "application/pdf",
+              txt: "text/plain",
+              html: "text/html",
+              json: "application/json",
+              csv: "text/csv",
+              md: "text/markdown",
+              png: "image/png",
+              jpg: "image/jpeg",
+              jpeg: "image/jpeg",
+              webp: "image/webp",
+              mp4: "video/mp4",
+            };
+            const targetMime = result.mimeType || mimeMap[ext];
+            if (targetMime && blob.type !== targetMime) {
+              blob = new Blob([blob], { type: targetMime });
+            }
+            const objectUrl = URL.createObjectURL(blob);
             urlCache.set(fileId, objectUrl);
             resolve({
               ...result,
+              blob,
               objectUrl,
             });
           } else {

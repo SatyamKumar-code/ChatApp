@@ -89,14 +89,20 @@ export const MessageBubble = ({
         message.documentDetails?.fileSize ||
         0;
 
+    // Helper to check if a URL is a real local blob/data URL
+    const isLocalBlobOrData = (url) =>
+        Boolean(url && typeof url === "string" && (url.startsWith("blob:") || url.startsWith("data:")));
+
     // Resolved local file URL (from memory or IndexedDB registry)
-    const [localFileUrl, setLocalFileUrl] = useState(message.fileUrl || "");
+    const [localFileUrl, setLocalFileUrl] = useState(() => {
+        return isLocalBlobOrData(message.fileUrl) ? message.fileUrl : "";
+    });
 
     useEffect(() => {
         let isMounted = true;
         if (message.fileId) {
             const transfer = fileTransfers?.[message.fileId];
-            if (transfer?.localUrl) {
+            if (transfer?.localUrl && isLocalBlobOrData(transfer.localUrl)) {
                 setLocalFileUrl(transfer.localUrl);
                 return;
             }
@@ -120,7 +126,7 @@ export const MessageBubble = ({
                     }
                 }
             });
-        } else if (message.fileUrl) {
+        } else if (isLocalBlobOrData(message.fileUrl)) {
             setLocalFileUrl(message.fileUrl);
         }
         return () => {
@@ -165,6 +171,7 @@ export const MessageBubble = ({
     }, [message.replyTo?.text, message.replyTo?._id, message.conversation, selectedConversation?._id, messages]);
 
     const [showImagePreview, setShowImagePreview] = useState(false);
+    const [showDocPreview, setShowDocPreview] = useState(false);
     const [showReactions, setShowReactions] = useState(false);
     const [showMenu, setShowMenu] = useState(false);
     const [showExtraReactions, setShowExtraReactions] = useState(false);
@@ -256,6 +263,77 @@ export const MessageBubble = ({
             hour: "2-digit",
             minute: "2-digit",
         });
+    };
+
+    const handleOpenDocument = async (e) => {
+        e?.stopPropagation?.();
+        let targetUrl = localFileUrl;
+
+        // If not already downloaded locally, download & decrypt it first so receiver can view it
+        if (!targetUrl || !isLocalBlobOrData(targetUrl)) {
+            if (message.fileId && downloadAndSaveFile) {
+                try {
+                    targetUrl = await downloadAndSaveFile({
+                        fileId: message.fileId,
+                        fileName,
+                        fileType: "document",
+                        fileSize,
+                        messageId: message._id,
+                        isUserGesture: true,
+                        triggerDownloadDialog: false,
+                    });
+                    if (targetUrl) {
+                        setLocalFileUrl(targetUrl);
+                    }
+                } catch (err) {
+                    console.error("Failed to download document for viewing:", err);
+                }
+            } else if (message.fileUrl && !isLocalBlobOrData(message.fileUrl)) {
+                const fullUrl = message.fileUrl.startsWith("http")
+                    ? message.fileUrl
+                    : `${import.meta.env.VITE_SERVER_URL}${message.fileUrl}`;
+                targetUrl = `${fullUrl}${fullUrl.includes("?") ? "&" : "?"}inline=true`;
+            }
+        }
+
+        if (!targetUrl) return;
+
+        const ext = (fileName || message.fileName || "").split(".").pop().toLowerCase();
+        const canPreviewInline = ["pdf", "txt", "csv", "json", "md", "html", "htm", "xml", "png", "jpg", "jpeg", "webp"].includes(ext);
+        if (canPreviewInline) {
+            setShowDocPreview(true);
+        } else {
+            window.open(targetUrl, "_blank", "noopener,noreferrer");
+        }
+    };
+
+    const handleDownloadDocument = async (e) => {
+        e?.stopPropagation?.();
+        let targetUrl = localFileUrl;
+        if (!targetUrl || !isLocalBlobOrData(targetUrl)) {
+            if (message.fileId && downloadAndSaveFile) {
+                targetUrl = await downloadAndSaveFile({
+                    fileId: message.fileId,
+                    fileName,
+                    fileType: "document",
+                    fileSize,
+                    messageId: message._id,
+                    isUserGesture: true,
+                    triggerDownloadDialog: true,
+                });
+                if (targetUrl) setLocalFileUrl(targetUrl);
+                return;
+            }
+        }
+
+        const docUrl = targetUrl || (message.fileId ? `${import.meta.env.VITE_SERVER_URL}/api/files/download/${message.fileId}` : "");
+        if (!docUrl) return;
+        const a = document.createElement("a");
+        a.href = docUrl;
+        a.download = fileName || message.fileName || "document";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
     };
 
     const isStarredByMe =
@@ -1021,7 +1099,12 @@ export const MessageBubble = ({
 
                         {/* Document / File Attachment (WhatsApp-Style Circular Transfer) */}
                         {isFile && (
-                            <div className="flex items-center gap-3 p-3 mb-2 rounded-2xl bg-black/25 hover:bg-black/35 border border-white/10 transition-all group/doc">
+                            <div
+                                onClick={localFileUrl && effectiveFileStatus !== "uploading" ? handleOpenDocument : undefined}
+                                className={`flex items-center gap-3 p-3 mb-2 rounded-2xl bg-black/25 hover:bg-black/35 border border-white/10 transition-all group/doc ${
+                                    localFileUrl && effectiveFileStatus !== "uploading" ? "cursor-pointer" : ""
+                                }`}
+                            >
                                 <div className="w-10 h-10 rounded-xl bg-purple-500/20 text-purple-300 flex items-center justify-center shrink-0">
                                     <svg
                                         xmlns="http://www.w3.org/2000/svg"
@@ -1039,7 +1122,7 @@ export const MessageBubble = ({
                                     </svg>
                                 </div>
                                 <div className="flex-1 min-w-0">
-                                    <p className="text-xs font-semibold text-white truncate">
+                                    <p className="text-xs font-semibold text-white truncate group-hover/doc:underline">
                                         {fileName}
                                     </p>
                                     <p className="text-[10px] text-zinc-400 mt-0.5 font-mono">
@@ -1053,23 +1136,20 @@ export const MessageBubble = ({
                                 </div>
 
                                 {localFileUrl && effectiveFileStatus !== "uploading" ? (
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            if (localFileUrl) {
-                                                const a = document.createElement("a");
-                                                a.href = localFileUrl;
-                                                a.download = fileName;
-                                                a.target = "_blank";
-                                                document.body.appendChild(a);
-                                                a.click();
-                                                document.body.removeChild(a);
-                                            }
-                                        }}
-                                        className="px-2.5 py-1 rounded-lg bg-purple-600/30 hover:bg-purple-600/50 text-purple-200 text-xs font-medium border border-purple-500/30 transition-all shrink-0"
-                                    >
-                                        Open
-                                    </button>
+                                    <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                                        <button
+                                            type="button"
+                                            onClick={handleOpenDocument}
+                                            title="View Document"
+                                            className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-purple-600/30 hover:bg-purple-600/50 text-purple-200 text-xs font-medium border border-purple-500/30 transition-all cursor-pointer shadow-xs hover:scale-105 active:scale-95"
+                                        >
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                            </svg>
+                                            <span>View</span>
+                                        </button>
+                                    </div>
                                 ) : (
                                     <CircularTransferProgress
                                         status={effectiveFileStatus}
@@ -1552,6 +1632,102 @@ export const MessageBubble = ({
                             {fileName}
                         </p>
                     )}
+                </div>
+            )}
+
+            {/* In-App Document Viewer Modal */}
+            {showDocPreview && (
+                <div
+                    onClick={() => setShowDocPreview(false)}
+                    className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex flex-col items-center justify-center p-2 sm:p-6 animate-in fade-in duration-200"
+                >
+                    <div
+                        onClick={(e) => e.stopPropagation()}
+                        className="w-full max-w-5xl h-[90vh] bg-zinc-900 border border-white/10 rounded-2xl flex flex-col overflow-hidden shadow-2xl ring-1 ring-white/10"
+                    >
+                        {/* Header */}
+                        <div className="flex items-center justify-between px-4 py-3 bg-zinc-950/90 border-b border-white/10 shrink-0">
+                            <div className="flex items-center gap-3 min-w-0 pr-2">
+                                <div className="w-8 h-8 rounded-lg bg-purple-500/20 text-purple-300 flex items-center justify-center shrink-0">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                    </svg>
+                                </div>
+                                <div className="min-w-0">
+                                    <h3 className="text-sm font-semibold text-white truncate">
+                                        {fileName || message.fileName || "Document Preview"}
+                                    </h3>
+                                    <p className="text-[11px] text-zinc-400 font-mono">
+                                        {formatBytes(fileSize) || "Document"}
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div className="flex items-center gap-2 shrink-0">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        const docUrl =
+                                            localFileUrl ||
+                                            (message.fileId
+                                                ? `${import.meta.env.VITE_SERVER_URL}/api/files/download/${message.fileId}?inline=true`
+                                                : message.fileUrl
+                                                ? message.fileUrl.startsWith("http")
+                                                    ? message.fileUrl
+                                                    : `${import.meta.env.VITE_SERVER_URL}${message.fileUrl}?inline=true`
+                                                : "");
+                                        if (docUrl) window.open(docUrl, "_blank", "noopener,noreferrer");
+                                    }}
+                                    className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer"
+                                    title="Open in new browser tab"
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                    </svg>
+                                    <span className="hidden sm:inline">New Tab</span>
+                                </button>
+                                {!localFileUrl && (
+                                    <button
+                                        type="button"
+                                        onClick={handleDownloadDocument}
+                                        className="px-3 py-1.5 rounded-xl bg-purple-600/30 hover:bg-purple-600/50 text-purple-200 border border-purple-500/30 text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer"
+                                        title="Download copy"
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                        </svg>
+                                        <span className="hidden sm:inline">Download</span>
+                                    </button>
+                                )}
+                                <button
+                                    type="button"
+                                    onClick={() => setShowDocPreview(false)}
+                                    className="w-8 h-8 rounded-xl bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-all cursor-pointer text-sm"
+                                    title="Close Preview"
+                                >
+                                    ✕
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Document Content View */}
+                        <div className="flex-1 w-full h-full bg-zinc-950 relative overflow-hidden flex flex-col">
+                            <iframe
+                                src={`${
+                                    localFileUrl ||
+                                    (message.fileId
+                                        ? `${import.meta.env.VITE_SERVER_URL}/api/files/download/${message.fileId}?inline=true`
+                                        : message.fileUrl
+                                        ? message.fileUrl.startsWith("http")
+                                            ? message.fileUrl
+                                            : `${import.meta.env.VITE_SERVER_URL}${message.fileUrl}?inline=true`
+                                        : "")
+                                }#toolbar=1`}
+                                title={fileName || "Document"}
+                                className="w-full h-full border-none bg-white rounded-b-xl"
+                            />
+                        </div>
+                    </div>
                 </div>
             )}
         </>

@@ -399,10 +399,18 @@ export const downloadFile = async (req, res) => {
     }
 
     // Verify authorized user
-    const isReceiver = delivery.receiverId.toString() === currentUserId;
-    const isSender = delivery.senderId.toString() === currentUserId;
+    const isReceiver = delivery.receiverId && delivery.receiverId.toString() === currentUserId;
+    const isSender = delivery.senderId && delivery.senderId.toString() === currentUserId;
+    let isAuthorized = isReceiver || isSender;
 
-    if (!isReceiver && !isSender) {
+    if (!isAuthorized && delivery.conversationId) {
+      const conv = await Conversation.findById(delivery.conversationId);
+      if (conv && Array.isArray(conv.participants) && conv.participants.some((p) => (p?._id || p)?.toString() === currentUserId)) {
+        isAuthorized = true;
+      }
+    }
+
+    if (!isAuthorized) {
       return res.status(403).json({
         success: false,
         message: "You are not authorized to download this file",
@@ -445,12 +453,33 @@ export const downloadFile = async (req, res) => {
       }
     }
 
-    // Set headers
-    res.setHeader("Content-Type", delivery.mimeType || "application/octet-stream");
+    // Set headers with accurate content-type
+    const ext = (delivery.fileName || "").split(".").pop().toLowerCase();
+    const mimeMap = {
+      pdf: "application/pdf",
+      txt: "text/plain",
+      html: "text/html",
+      json: "application/json",
+      csv: "text/csv",
+      md: "text/markdown",
+      png: "image/png",
+      jpg: "image/jpeg",
+      jpeg: "image/jpeg",
+      webp: "image/webp",
+      mp4: "video/mp4",
+    };
+    const contentType =
+      delivery.mimeType && delivery.mimeType !== "application/octet-stream"
+        ? delivery.mimeType
+        : mimeMap[ext] || "application/octet-stream";
+
+    res.setHeader("Content-Type", contentType);
     res.setHeader("Content-Length", delivery.fileSize);
+
+    const isInline = req.query.inline === "true" || req.query.preview === "true";
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename="${encodeURIComponent(sanitizeFileName(delivery.fileName))}"`
+      `${isInline ? "inline" : "attachment"}; filename="${encodeURIComponent(sanitizeFileName(delivery.fileName))}"`
     );
 
     // Stream decrypted file directly to response
