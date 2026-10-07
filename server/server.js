@@ -14,7 +14,14 @@ import messageRoutes from './routes/messageRoutes.js';
 import statusRoutes from './routes/statusRoutes.js';
 import callRoutes from './routes/callRoutes.js';
 import fileRoutes from './routes/fileRoutes.js';
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
 import { cleanupExpiredFiles } from './services/fileStorageService.js';
+import { cleanupExpiredStatuses } from './controllers/statusController.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 import { Server } from 'socket.io';
 import { setupSocket } from './socket/socketServer.js';
@@ -59,6 +66,17 @@ app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ limit: "10mb", extended: true }));
 app.use(cookieParser());
 
+// Static uploads serving (for status photos, status videos, etc.)
+const uploadsDir = path.resolve(__dirname, "uploads");
+if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+}
+const statusUploadDir = path.resolve(uploadsDir, "status");
+if (!fs.existsSync(statusUploadDir)) {
+    fs.mkdirSync(statusUploadDir, { recursive: true });
+}
+app.use("/uploads", express.static(uploadsDir));
+
 app.use("/api/auth", authRouter);
 app.use("/api/contacts", contactRouter);
 app.use("/api/conversations", conversationRouter);
@@ -95,6 +113,16 @@ const startServer = async () => {
         }, 15 * 60 * 1000);
     } catch (err) {
         console.error("Failed to run file retention cleanup:", err);
+    }
+
+    // Run 24-hour status cleanup on boot and every 10 minutes
+    try {
+        await cleanupExpiredStatuses(io);
+        setInterval(() => {
+            cleanupExpiredStatuses(io);
+        }, 10 * 60 * 1000);
+    } catch (err) {
+        console.error("Failed to run status 24h cleanup:", err);
     }
 
     server.listen(PORT, () => {

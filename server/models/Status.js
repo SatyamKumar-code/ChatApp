@@ -10,7 +10,7 @@ const statusSchema = new mongoose.Schema(
         },
         type: {
             type: String,
-            enum: ["text", "photo"],
+            enum: ["text", "photo", "video"],
             default: "text",
         },
         text: {
@@ -22,6 +22,14 @@ const statusSchema = new mongoose.Schema(
         photoUrl: {
             type: String,
             default: "",
+        },
+        videoUrl: {
+            type: String,
+            default: "",
+        },
+        videoDuration: {
+            type: Number,
+            default: 0,
         },
         gradient: {
             type: String,
@@ -52,6 +60,7 @@ const statusSchema = new mongoose.Schema(
 );
 
 statusSchema.index({ createdAt: -1 });
+statusSchema.index({ createdAt: 1 }, { expireAfterSeconds: 86400 });
 
 const Status = mongoose.model("Status", statusSchema);
 

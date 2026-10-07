@@ -56,6 +56,17 @@ describe('statusController – Stories/Status Functionality', () => {
             assert.equal(res.body.success, false);
             assert.match(res.body.message, /Photo is required/i);
         });
+
+        it('returns 400 when video status lacks videoUrl', async () => {
+            const req = buildReq({ body: { type: 'video', videoUrl: '' } });
+            const res = buildRes();
+
+            await createStatus(req, res);
+
+            assert.equal(res.statusCode, 400);
+            assert.equal(res.body.success, false);
+            assert.match(res.body.message, /Video is required/i);
+        });
     });
 
     describe('viewStatus and deleteStatus error handling', () => {

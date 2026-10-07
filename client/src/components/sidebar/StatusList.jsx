@@ -26,11 +26,16 @@ export const StatusList = ({ onOpenSettings }) => {
 
     // Creation modal states
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-    const [addType, setAddType] = useState("text"); // 'text' | 'photo'
+    const [addType, setAddType] = useState("text"); // 'text' | 'photo' | 'video'
     const [statusText, setStatusText] = useState("");
     const [selectedGradient, setSelectedGradient] = useState(STATUS_GRADIENTS[0]);
+    const [photoFile, setPhotoFile] = useState(null);
     const [photoDataUrl, setPhotoDataUrl] = useState("");
     const [photoCaption, setPhotoCaption] = useState("");
+    const [videoFile, setVideoFile] = useState(null);
+    const [videoPreviewUrl, setVideoPreviewUrl] = useState("");
+    const [videoCaption, setVideoCaption] = useState("");
+    const [videoDuration, setVideoDuration] = useState(0);
     const [isSubmitting, setIsSubmitting] = useState(false);
 
     // Story Player States (User Group + Status Index)
@@ -43,6 +48,21 @@ export const StatusList = ({ onOpenSettings }) => {
     const [showViewersList, setShowViewersList] = useState(false);
 
     const fileInputRef = useRef(null);
+    const videoInputRef = useRef(null);
+    const storyVideoRef = useRef(null);
+
+    const getStatusMediaUrl = (url) => {
+        if (!url) return "";
+        if (
+            url.startsWith("http://") ||
+            url.startsWith("https://") ||
+            url.startsWith("blob:") ||
+            url.startsWith("data:")
+        ) {
+            return url;
+        }
+        return `${import.meta.env.VITE_SERVER_URL}${url}`;
+    };
 
     // Fetch Statuses from Database
     const fetchStatuses = async () => {
@@ -221,35 +241,86 @@ export const StatusList = ({ onOpenSettings }) => {
         const file = e.target.files?.[0];
         if (!file) return;
 
-        if (file.size > 8 * 1024 * 1024) {
-            alert("Image size should be under 8MB");
+        if (file.size > 15 * 1024 * 1024) {
+            alert("Image size should be under 15MB");
             return;
         }
 
+        setPhotoFile(file);
         const reader = new FileReader();
         reader.onload = (loadEvt) => {
             setPhotoDataUrl(loadEvt.target.result);
             setAddType("photo");
+            setIsAddModalOpen(true);
         };
         reader.readAsDataURL(file);
+    };
+
+    // Handle Video Selection
+    const handleVideoSelect = (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        if (file.size > 60 * 1024 * 1024) {
+            alert("Video size should be under 60MB");
+            return;
+        }
+
+        const url = URL.createObjectURL(file);
+        setVideoFile(file);
+        setVideoPreviewUrl(url);
+        setAddType("video");
+        setIsAddModalOpen(true);
+
+        // Calculate video duration
+        const tempVideo = document.createElement("video");
+        tempVideo.preload = "metadata";
+        tempVideo.src = url;
+        tempVideo.onloadedmetadata = () => {
+            setVideoDuration(Math.round(tempVideo.duration) || 0);
+        };
     };
 
     // Add New Real Status
     const handleCreateStatus = async (e) => {
         e?.preventDefault();
         if (addType === "text" && !statusText.trim()) return;
-        if (addType === "photo" && !photoDataUrl) return;
+        if (addType === "photo" && !photoDataUrl && !photoFile) return;
+        if (addType === "video" && !videoFile && !videoPreviewUrl) return;
 
         try {
             setIsSubmitting(true);
-            const payload = {
-                type: addType,
-                text: addType === "text" ? statusText.trim() : photoCaption.trim(),
-                photoUrl: addType === "photo" ? photoDataUrl : "",
-                gradient: selectedGradient,
-            };
+            let res;
 
-            const res = await api.post("/status", payload);
+            if (addType === "video" && videoFile) {
+                const formData = new FormData();
+                formData.append("type", "video");
+                formData.append("media", videoFile);
+                formData.append("text", videoCaption.trim());
+                formData.append("videoDuration", videoDuration);
+
+                res = await api.post("/status", formData, {
+                    headers: { "Content-Type": "multipart/form-data" },
+                });
+            } else if (addType === "photo" && photoFile) {
+                const formData = new FormData();
+                formData.append("type", "photo");
+                formData.append("media", photoFile);
+                formData.append("text", photoCaption.trim());
+
+                res = await api.post("/status", formData, {
+                    headers: { "Content-Type": "multipart/form-data" },
+                });
+            } else {
+                const payload = {
+                    type: addType,
+                    text: addType === "text" ? statusText.trim() : photoCaption.trim(),
+                    photoUrl: addType === "photo" ? photoDataUrl : "",
+                    gradient: selectedGradient,
+                };
+                res = await api.post("/status", payload);
+            }
+
             if (res.data?.success && res.data?.data) {
                 const created = res.data.data;
                 setStatuses((prev) => [
@@ -260,8 +331,13 @@ export const StatusList = ({ onOpenSettings }) => {
 
             setIsAddModalOpen(false);
             setStatusText("");
+            setPhotoFile(null);
             setPhotoDataUrl("");
             setPhotoCaption("");
+            setVideoFile(null);
+            setVideoPreviewUrl("");
+            setVideoCaption("");
+            setVideoDuration(0);
             setAddType("text");
         } catch (error) {
             console.error("Create status failed:", error);
@@ -403,9 +479,15 @@ export const StatusList = ({ onOpenSettings }) => {
         }
     };
 
-    // Story Player Timer Loop (~5 seconds per status)
+    // Story Player Timer Loop (~5 seconds per status, except video which uses video timeupdate)
     useEffect(() => {
         if (!activeStoryGroup || isViewerPaused || showViewersList) return;
+
+        const currentStatus = activeStoryGroup.statuses[storyStatusIndex];
+        if (currentStatus?.type === "video") {
+            // Video playback drives its own progress via onTimeUpdate and onEnded
+            return;
+        }
 
         const interval = setInterval(() => {
             setViewerProgress((prev) => {
@@ -559,6 +641,16 @@ export const StatusList = ({ onOpenSettings }) => {
                             >
                                 📷
                             </button>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    videoInputRef.current?.click();
+                                }}
+                                className="w-8 h-8 rounded-xl bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white flex items-center justify-center text-sm transition-colors cursor-pointer"
+                                title="Upload Video Status"
+                            >
+                                🎥
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -608,6 +700,10 @@ export const StatusList = ({ onOpenSettings }) => {
                                     {grp.count > 1 ? (
                                         <span className="text-xs px-2 py-0.5 rounded-full bg-purple-500/15 text-purple-300 font-semibold border border-purple-500/25">
                                             {grp.count} stories
+                                        </span>
+                                    ) : grp.latestStatus.type === "video" ? (
+                                        <span className="text-xs text-purple-400 font-medium flex items-center gap-1">
+                                            🎥 Video
                                         </span>
                                     ) : grp.latestStatus.type === "photo" ? (
                                         <span className="text-xs text-zinc-500 font-medium">
@@ -665,6 +761,24 @@ export const StatusList = ({ onOpenSettings }) => {
                                             {grp.count > 1 && ` • ${grp.count} updates`}
                                         </p>
                                     </div>
+
+                                    {grp.count > 1 ? (
+                                        <span className="text-xs px-2 py-0.5 rounded-full bg-white/10 text-zinc-400 font-semibold">
+                                            {grp.count} stories
+                                        </span>
+                                    ) : grp.latestStatus.type === "video" ? (
+                                        <span className="text-xs text-zinc-400 font-medium flex items-center gap-1">
+                                            🎥 Video
+                                        </span>
+                                    ) : grp.latestStatus.type === "photo" ? (
+                                        <span className="text-xs text-zinc-500 font-medium">
+                                            📷 Photo
+                                        </span>
+                                    ) : (
+                                        <span className="text-xs text-zinc-500 font-medium truncate max-w-[80px]">
+                                            ✍️ {grp.latestStatus.text}
+                                        </span>
+                                    )}
                                 </div>
                             ))}
                         </div>
@@ -696,12 +810,19 @@ export const StatusList = ({ onOpenSettings }) => {
                 )}
             </div>
 
-            {/* Hidden Photo Input */}
+            {/* Hidden Photo & Video Inputs */}
             <input
                 type="file"
                 ref={fileInputRef}
                 accept="image/*"
                 onChange={handlePhotoSelect}
+                className="hidden"
+            />
+            <input
+                type="file"
+                ref={videoInputRef}
+                accept="video/mp4,video/webm,video/quicktime,video/*"
+                onChange={handleVideoSelect}
                 className="hidden"
             />
 
@@ -732,34 +853,46 @@ export const StatusList = ({ onOpenSettings }) => {
                             </button>
                         </div>
 
-                        {/* Switch Type Tabs */}
-                        <div className="px-5 pt-3 flex items-center gap-2">
+                        {/* Tabs: Text vs Photo vs Video */}
+                        <div className="flex rounded-xl bg-[#181830] p-1 mx-5 mt-3 border border-white/5">
                             <button
                                 type="button"
-                                onClick={() => {
-                                    setAddType("text");
-                                    setPhotoDataUrl("");
-                                }}
+                                onClick={() => setAddType("text")}
                                 className={`flex-1 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
                                     addType === "text"
                                         ? "bg-purple-600 text-white shadow-md shadow-purple-600/30"
-                                        : "bg-white/5 text-zinc-400 hover:text-white"
+                                        : "bg-transparent text-zinc-400 hover:text-white"
                                 }`}
                             >
-                                ✍️ Text Status
+                                ✍️ Text
                             </button>
                             <button
                                 type="button"
                                 onClick={() => {
+                                    setAddType("photo");
                                     fileInputRef.current?.click();
                                 }}
                                 className={`flex-1 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
                                     addType === "photo"
                                         ? "bg-purple-600 text-white shadow-md shadow-purple-600/30"
-                                        : "bg-white/5 text-zinc-400 hover:text-white"
+                                        : "bg-transparent text-zinc-400 hover:text-white"
                                 }`}
                             >
-                                📷 Photo Status
+                                📷 Photo
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setAddType("video");
+                                    videoInputRef.current?.click();
+                                }}
+                                className={`flex-1 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                                    addType === "video"
+                                        ? "bg-purple-600 text-white shadow-md shadow-purple-600/30"
+                                        : "bg-transparent text-zinc-400 hover:text-white"
+                                }`}
+                            >
+                                🎥 Video
                             </button>
                         </div>
 
@@ -808,6 +941,52 @@ export const StatusList = ({ onOpenSettings }) => {
                                         </div>
                                     </div>
                                 </div>
+                            ) : addType === "video" ? (
+                                <div className="space-y-3">
+                                    {videoPreviewUrl ? (
+                                        <div className="relative w-full h-56 rounded-2xl overflow-hidden bg-black border border-white/10">
+                                            <video
+                                                src={videoPreviewUrl}
+                                                controls
+                                                playsInline
+                                                className="w-full h-full object-contain"
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setVideoPreviewUrl("");
+                                                    setVideoFile(null);
+                                                    setVideoDuration(0);
+                                                }}
+                                                className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/80 hover:bg-black text-white flex items-center justify-center text-xs cursor-pointer shadow-md"
+                                            >
+                                                ✕
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <div
+                                            onClick={() => videoInputRef.current?.click()}
+                                            className="w-full h-44 rounded-2xl border-2 border-dashed border-purple-500/40 hover:border-purple-400 bg-purple-600/5 flex flex-col items-center justify-center gap-2 cursor-pointer transition-colors"
+                                        >
+                                            <span className="text-3xl">🎥</span>
+                                            <span className="text-xs font-semibold text-purple-300">
+                                                Click to select video from device
+                                            </span>
+                                            <span className="text-[10px] text-zinc-500">
+                                                MP4, WebM, MOV (Max 60MB)
+                                            </span>
+                                        </div>
+                                    )}
+
+                                    <input
+                                        type="text"
+                                        value={videoCaption}
+                                        onChange={(e) => setVideoCaption(e.target.value)}
+                                        placeholder="Add an optional video caption..."
+                                        maxLength={150}
+                                        className="w-full px-3.5 py-2.5 bg-[#1b1b36] border border-white/10 rounded-xl text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-purple-500 transition-colors"
+                                    />
+                                </div>
                             ) : (
                                 <div className="space-y-3">
                                     {photoDataUrl ? (
@@ -819,7 +998,10 @@ export const StatusList = ({ onOpenSettings }) => {
                                             />
                                             <button
                                                 type="button"
-                                                onClick={() => setPhotoDataUrl("")}
+                                                onClick={() => {
+                                                    setPhotoDataUrl("");
+                                                    setPhotoFile(null);
+                                                }}
                                                 className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/70 text-white flex items-center justify-center text-xs"
                                             >
                                                 ✕
@@ -854,7 +1036,8 @@ export const StatusList = ({ onOpenSettings }) => {
                                 disabled={
                                     isSubmitting ||
                                     (addType === "text" && !statusText.trim()) ||
-                                    (addType === "photo" && !photoDataUrl)
+                                    (addType === "photo" && !photoDataUrl && !photoFile) ||
+                                    (addType === "video" && !videoFile && !videoPreviewUrl)
                                 }
                                 className="w-full py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 disabled:opacity-40 text-white text-xs font-semibold shadow-lg shadow-purple-600/30 transition-all cursor-pointer flex items-center justify-center gap-2"
                             >
@@ -878,10 +1061,22 @@ export const StatusList = ({ onOpenSettings }) => {
                 ======================================================== */}
             {activeStoryGroup && currentViewingStatus && (
                 <div
-                    onMouseDown={() => setIsViewerPaused(true)}
-                    onMouseUp={() => setIsViewerPaused(false)}
-                    onTouchStart={() => setIsViewerPaused(true)}
-                    onTouchEnd={() => setIsViewerPaused(false)}
+                    onMouseDown={() => {
+                        setIsViewerPaused(true);
+                        storyVideoRef.current?.pause();
+                    }}
+                    onMouseUp={() => {
+                        setIsViewerPaused(false);
+                        storyVideoRef.current?.play().catch(() => {});
+                    }}
+                    onTouchStart={() => {
+                        setIsViewerPaused(true);
+                        storyVideoRef.current?.pause();
+                    }}
+                    onTouchEnd={() => {
+                        setIsViewerPaused(false);
+                        storyVideoRef.current?.play().catch(() => {});
+                    }}
                     className="fixed inset-0 z-50 bg-black/95 backdrop-blur-lg flex items-center justify-center p-0 md:p-4 select-none animate-in fade-in duration-150"
                 >
                     <div className="relative w-full md:max-w-md h-full md:h-[85vh] bg-[#101020] md:rounded-3xl overflow-hidden flex flex-col shadow-2xl border border-white/10">
@@ -979,10 +1174,31 @@ export const StatusList = ({ onOpenSettings }) => {
                                 title="Next"
                             />
 
-                            {currentViewingStatus.type === "photo" && currentViewingStatus.photoUrl ? (
+                            {currentViewingStatus.type === "video" && currentViewingStatus.videoUrl ? (
+                                <div className="w-full h-full flex flex-col items-center justify-center relative">
+                                    <video
+                                        ref={storyVideoRef}
+                                        src={getStatusMediaUrl(currentViewingStatus.videoUrl)}
+                                        autoPlay
+                                        playsInline
+                                        className="max-w-full max-h-[70vh] object-contain rounded-2xl shadow-2xl bg-black"
+                                        onTimeUpdate={(e) => {
+                                            const ct = e.currentTarget.currentTime;
+                                            const dur = e.currentTarget.duration || 1;
+                                            setViewerProgress(Math.min(100, (ct / dur) * 100));
+                                        }}
+                                        onEnded={handleNextStory}
+                                    />
+                                    {currentViewingStatus.text && (
+                                        <div className="absolute bottom-20 inset-x-4 p-3 rounded-2xl bg-black/70 backdrop-blur-md text-white text-xs text-center z-15">
+                                            {currentViewingStatus.text}
+                                        </div>
+                                    )}
+                                </div>
+                            ) : currentViewingStatus.type === "photo" && currentViewingStatus.photoUrl ? (
                                 <div className="w-full h-full flex flex-col items-center justify-center">
                                     <img
-                                        src={currentViewingStatus.photoUrl}
+                                        src={getStatusMediaUrl(currentViewingStatus.photoUrl)}
                                         alt="Status"
                                         className="max-w-full max-h-[70vh] object-contain rounded-2xl shadow-2xl"
                                     />
