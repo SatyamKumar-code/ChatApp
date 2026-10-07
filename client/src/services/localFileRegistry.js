@@ -223,10 +223,11 @@ export const getLocalFile = async (fileId) => {
 
   // Return cached ObjectURL if already available
   if (urlCache.has(fileId)) {
+    const cachedUrl = urlCache.get(fileId);
     try {
       const db = await getDB();
       if (!db || !db.objectStoreNames.contains(STORE_NAME)) {
-        return { fileId, objectUrl: urlCache.get(fileId) };
+        return { fileId, objectUrl: cachedUrl };
       }
       const record = await new Promise((resolve) => {
         try {
@@ -239,14 +240,12 @@ export const getLocalFile = async (fileId) => {
           resolve(null);
         }
       });
-      if (record && record.blob) {
-        return {
-          ...record,
-          objectUrl: urlCache.get(fileId),
-        };
-      }
+      return {
+        ...(record || { fileId }),
+        objectUrl: cachedUrl,
+      };
     } catch {
-      // ignore
+      return { fileId, objectUrl: cachedUrl };
     }
   }
 

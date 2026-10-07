@@ -302,8 +302,7 @@ const setupSocket = (io) => {
             );
           }
 
-          await deleteTemporaryFile(fileId);
-
+          // Keep temporary file available during retention period
           io.to(`user:${delivery.senderId.toString()}`).emit("file:status_update", {
             fileId,
             messageId: delivery.messageId,

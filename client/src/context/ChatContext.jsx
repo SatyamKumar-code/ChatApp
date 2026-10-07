@@ -142,6 +142,13 @@ const ChatProvider = ({ children }) => {
     // Offline file delivery and transfer states
     // fileId -> { status, progress, loadedBytes, totalBytes, localUrl, error }
     const [fileTransfers, setFileTransfers] = useState({});
+    const fileTransfersRef = useRef(fileTransfers);
+    const activeDownloadsRef = useRef(new Map());
+
+    useEffect(() => {
+        fileTransfersRef.current = fileTransfers;
+    }, [fileTransfers]);
+
     const [pendingOfflineFiles, setPendingOfflineFiles] = useState([]);
 
     const toggleSelectMessage = (messageId) => {
@@ -345,20 +352,30 @@ const ChatProvider = ({ children }) => {
                         return false;
                     });
 
+                    // Preserve existing fileUrl (e.g. localPreviewUrl) if decryptedMessage has empty fileUrl
+                    const existingFileUrl =
+                        (realExistsIndex !== -1 ? prev[realExistsIndex]?.fileUrl : "") ||
+                        (optimisticIndex !== -1 ? prev[optimisticIndex]?.fileUrl : "") ||
+                        "";
+                    const mergedMessage = {
+                        ...decryptedMessage,
+                        fileUrl: decryptedMessage.fileUrl || existingFileUrl,
+                    };
+
                     let updated;
                     if (realExistsIndex !== -1) {
                         // Real message already exists: keep it updated and remove any leftover optimistic item
-                        updated = prev.map((m, idx) => (idx === realExistsIndex ? decryptedMessage : m));
+                        updated = prev.map((m, idx) => (idx === realExistsIndex ? mergedMessage : m));
                         if (optimisticIndex !== -1 && optimisticIndex !== realExistsIndex) {
                             updated = updated.filter((_, idx) => idx !== optimisticIndex);
                         }
                     } else if (optimisticIndex !== -1) {
                         // Replace the optimistic message in-place with the server-confirmed message
                         updated = [...prev];
-                        updated[optimisticIndex] = decryptedMessage;
+                        updated[optimisticIndex] = mergedMessage;
                     } else {
                         // New incoming message from partner: append
-                        updated = [...prev, decryptedMessage];
+                        updated = [...prev, mergedMessage];
                     }
 
                     // Extra deduplication safeguard: purge any duplicate entries matching tempId or real ID
@@ -373,6 +390,24 @@ const ChatProvider = ({ children }) => {
                     if (convId) {
                         saveCachedMessages(convId, updated);
                     }
+
+                    // Auto-download images in background so both sender and receiver see photo directly
+                    if (mergedMessage.messageType === "image" && mergedMessage.fileId) {
+                        const fid = mergedMessage.fileId;
+                        if (!fileTransfersRef.current?.[fid]?.localUrl) {
+                            setTimeout(() => {
+                                downloadAndSaveFile({
+                                    fileId: fid,
+                                    fileName: mergedMessage.fileName || "image.png",
+                                    fileType: "image",
+                                    fileSize: mergedMessage.fileSize || 0,
+                                    messageId: mergedMessage._id,
+                                    isUserGesture: false,
+                                }).catch(() => {});
+                            }, 50);
+                        }
+                    }
+
                     return updated;
                 });
             } else if (convId) {
@@ -806,7 +841,7 @@ const ChatProvider = ({ children }) => {
         };
 
         const handleFileAvailable = (data) => {
-            const { fileId, fileName, fileSize, fileType, status } = data || {};
+            const { fileId, fileName, fileSize, fileType, status, messageId } = data || {};
             if (fileId) {
                 setFileTransfers((prev) => ({
                     ...prev,
@@ -818,6 +853,20 @@ const ChatProvider = ({ children }) => {
                         fileType,
                     },
                 }));
+
+                // Auto-download images immediately so receiver views photo directly in chat bubble
+                if (fileType === "image" && !fileTransfersRef.current?.[fileId]?.localUrl) {
+                    setTimeout(() => {
+                        downloadAndSaveFile({
+                            fileId,
+                            fileName: fileName || "image.png",
+                            fileType: "image",
+                            fileSize: fileSize || 0,
+                            messageId,
+                            isUserGesture: false,
+                        }).catch(() => {});
+                    }, 50);
+                }
             }
         };
 
@@ -1575,172 +1624,187 @@ const ChatProvider = ({ children }) => {
         fileType,
         fileSize,
         messageId,
+        isUserGesture = false,
     }) => {
         if (!fileId) return;
 
-        // Check if already in local registry
-        try {
-            const existing = await getLocalFile(fileId);
-            if (existing && existing.objectUrl) {
-                setFileTransfers((prev) => ({
-                    ...prev,
-                    [fileId]: {
-                        status: "downloaded",
-                        progress: 100,
-                        localUrl: existing.objectUrl,
-                    },
-                }));
-                return existing.objectUrl;
-            }
-        } catch (e) {
-            console.warn("Error checking existing local file:", e);
+        // Prevent duplicate concurrent downloads for the same file
+        if (activeDownloadsRef.current.has(fileId)) {
+            return activeDownloadsRef.current.get(fileId);
         }
 
-        // On PC desktop, if no directory handle is linked yet, prompt user once to link Downloads folder so ChatApp folder is created
-        if (typeof window !== "undefined" && typeof window.showDirectoryPicker === "function") {
+        const downloadTask = (async () => {
+            // Check if already in local registry
             try {
-                const hasHandle = await hasStoredDirectoryHandle();
-                if (!hasHandle) {
-                    await promptSelectChatAppDirectory();
-                }
-            } catch (e) {
-                // User dismissed or cancelled directory picker, will fall back to browser download
-            }
-        }
-
-        setFileTransfers((prev) => ({
-            ...prev,
-            [fileId]: {
-                status: "downloading",
-                progress: 0,
-                loadedBytes: 0,
-                totalBytes: fileSize || 0,
-            },
-        }));
-
-        return new Promise((resolve, reject) => {
-            const xhr = new XMLHttpRequest();
-            xhr.open("GET", `${import.meta.env.VITE_SERVER_URL}/api/files/download/${fileId}`);
-            xhr.withCredentials = true;
-            xhr.responseType = "blob";
-
-            xhr.onprogress = (evt) => {
-                const total = evt.lengthComputable ? evt.total : fileSize || 0;
-                const loaded = evt.loaded;
-                const progress = total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : 50;
-
-                setFileTransfers((prev) => ({
-                    ...prev,
-                    [fileId]: {
-                        status: "downloading",
-                        progress,
-                        loadedBytes: loaded,
-                        totalBytes: total,
-                    },
-                }));
-            };
-
-            xhr.onload = async () => {
-                if (xhr.status === 200) {
-                    try {
-                        const blob = xhr.response;
-
-                        // 1. Save permanently to local IndexedDB registry & native disk if permitted
-                        const saved = await saveLocalFile({
-                            fileId,
-                            messageId,
-                            blob,
-                            fileName,
-                            fileType,
-                            mimeType: blob.type,
-                            fileSize: blob.size,
-                            direction: "Received",
-                        });
-
-                        // 2. Trigger browser download ONLY if not saved directly to native disk
-                        if (!saved?.savedToDisk) {
-                            triggerDeviceDownload(blob, fileName, fileType, "Received");
-                        }
-
-                        // 3. Acknowledge download completion so server deletes temporary encrypted copy!
-                        api.post(`/files/acknowledge/${fileId}`).catch(() => {});
-                        if (socket && socket.connected) {
-                            socket.emit("file:download_complete", { fileId });
-                        }
-
-                        const objectUrl = saved?.objectUrl || URL.createObjectURL(blob);
-
-                        setFileTransfers((prev) => ({
-                            ...prev,
-                            [fileId]: {
-                                status: "downloaded",
-                                progress: 100,
-                                localUrl: objectUrl,
-                            },
-                        }));
-
-                        setMessages((prev) =>
-                            prev.map((m) =>
-                                m.fileId === fileId
-                                    ? {
-                                          ...m,
-                                          fileTransferStatus: "downloaded",
-                                          fileUrl: m.fileUrl || objectUrl,
-                                      }
-                                    : m
-                            )
-                        );
-
-                        resolve(objectUrl);
-                    } catch (err) {
-                        console.error("Save local file error:", err);
-                        reject(err);
-                    }
-                } else if (xhr.status === 410) {
-                    // Expired on server
+                const existing = await getLocalFile(fileId);
+                if (existing && existing.objectUrl) {
                     setFileTransfers((prev) => ({
                         ...prev,
                         [fileId]: {
-                            status: "expired",
-                            progress: 0,
-                            error: "File is no longer available on server",
+                            status: "downloaded",
+                            progress: 100,
+                            localUrl: existing.objectUrl,
                         },
                     }));
-                    setMessages((prev) =>
-                        prev.map((m) =>
-                            m.fileId === fileId
-                                ? { ...m, fileTransferStatus: "expired" }
-                                : m
-                        )
-                    );
-                    reject(new Error("File expired"));
-                } else {
+                    return existing.objectUrl;
+                }
+            } catch (e) {
+                console.warn("Error checking existing local file:", e);
+            }
+
+            // On PC desktop, prompt user to link Downloads folder ONLY if this was an explicit user gesture (not background auto-download)
+            if (isUserGesture && typeof window !== "undefined" && typeof window.showDirectoryPicker === "function") {
+                try {
+                    const hasHandle = await hasStoredDirectoryHandle();
+                    if (!hasHandle) {
+                        await promptSelectChatAppDirectory();
+                    }
+                } catch (e) {
+                    // User dismissed or cancelled directory picker, will fall back to browser download
+                }
+            }
+
+            setFileTransfers((prev) => ({
+                ...prev,
+                [fileId]: {
+                    status: "downloading",
+                    progress: 0,
+                    loadedBytes: 0,
+                    totalBytes: fileSize || 0,
+                },
+            }));
+
+            return new Promise((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
+                xhr.open("GET", `${import.meta.env.VITE_SERVER_URL}/api/files/download/${fileId}`);
+                xhr.withCredentials = true;
+                xhr.responseType = "blob";
+
+                xhr.onprogress = (evt) => {
+                    const total = evt.lengthComputable ? evt.total : fileSize || 0;
+                    const loaded = evt.loaded;
+                    const progress = total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : 50;
+
+                    setFileTransfers((prev) => ({
+                        ...prev,
+                        [fileId]: {
+                            status: "downloading",
+                            progress,
+                            loadedBytes: loaded,
+                            totalBytes: total,
+                        },
+                    }));
+                };
+
+                xhr.onload = async () => {
+                    if (xhr.status === 200) {
+                        try {
+                            const blob = xhr.response;
+
+                            // 1. Save permanently to local IndexedDB registry & native disk if permitted
+                            const saved = await saveLocalFile({
+                                fileId,
+                                messageId,
+                                blob,
+                                fileName,
+                                fileType,
+                                mimeType: blob.type,
+                                fileSize: blob.size,
+                                direction: "Received",
+                            });
+
+                            // 2. Trigger browser download popup ONLY for documents/manual downloads (not auto-downloaded photos)
+                            if (!saved?.savedToDisk && isUserGesture && fileType !== "image") {
+                                triggerDeviceDownload(blob, fileName, fileType, "Received");
+                            }
+
+                            // 3. Acknowledge download completion
+                            api.post(`/files/acknowledge/${fileId}`).catch(() => {});
+                            if (socket && socket.connected) {
+                                socket.emit("file:download_complete", { fileId });
+                            }
+
+                            const objectUrl = saved?.objectUrl || URL.createObjectURL(blob);
+
+                            setFileTransfers((prev) => ({
+                                ...prev,
+                                [fileId]: {
+                                    status: "downloaded",
+                                    progress: 100,
+                                    localUrl: objectUrl,
+                                },
+                            }));
+
+                            setMessages((prev) =>
+                                prev.map((m) =>
+                                    m.fileId === fileId
+                                        ? {
+                                              ...m,
+                                              fileTransferStatus: "downloaded",
+                                              fileUrl: objectUrl,
+                                          }
+                                        : m
+                                )
+                            );
+
+                            resolve(objectUrl);
+                        } catch (err) {
+                            console.error("Save local file error:", err);
+                            reject(err);
+                        }
+                    } else if (xhr.status === 410) {
+                        // Expired on server
+                        setFileTransfers((prev) => ({
+                            ...prev,
+                            [fileId]: {
+                                status: "expired",
+                                progress: 0,
+                                error: "File is no longer available on server",
+                            },
+                        }));
+                        setMessages((prev) =>
+                            prev.map((m) =>
+                                m.fileId === fileId
+                                    ? { ...m, fileTransferStatus: "expired" }
+                                    : m
+                            )
+                        );
+                        reject(new Error("File expired"));
+                    } else {
+                        setFileTransfers((prev) => ({
+                            ...prev,
+                            [fileId]: {
+                                status: "failed",
+                                progress: 0,
+                                error: "Download failed",
+                            },
+                        }));
+                        reject(new Error("Download failed: " + xhr.status));
+                    }
+                };
+
+                xhr.onerror = () => {
                     setFileTransfers((prev) => ({
                         ...prev,
                         [fileId]: {
                             status: "failed",
                             progress: 0,
-                            error: "Download failed",
+                            error: "Network error",
                         },
                     }));
-                    reject(new Error("Download failed: " + xhr.status));
-                }
-            };
+                    reject(new Error("Network error during file download"));
+                };
 
-            xhr.onerror = () => {
-                setFileTransfers((prev) => ({
-                    ...prev,
-                    [fileId]: {
-                        status: "failed",
-                        progress: 0,
-                        error: "Network error",
-                    },
-                }));
-                reject(new Error("Network error during file download"));
-            };
+                xhr.send();
+            });
+        })();
 
-            xhr.send();
-        });
+        activeDownloadsRef.current.set(fileId, downloadTask);
+        try {
+            return await downloadTask;
+        } finally {
+            activeDownloadsRef.current.delete(fileId);
+        }
     };
 
     /**

@@ -52,6 +52,43 @@ export const MessageBubble = ({
     const isSelectionMode = Boolean(selectedMessageIds && selectedMessageIds.length > 0);
     const isSelected = Boolean(selectedMessageIds && selectedMessageIds.includes(message._id));
 
+    const isAudio =
+        message.messageType === "audio" ||
+        (message.fileUrl &&
+            (message.fileUrl.startsWith("data:audio") ||
+                message.fileUrl.includes("audio/")));
+    const isImage =
+        !isAudio &&
+        (message.messageType === "image" ||
+            message.fileModelRef === "Image" ||
+            (message.fileUrl && message.fileUrl.startsWith("data:image")));
+    const isVideo =
+        !isAudio &&
+        (message.messageType === "video" ||
+            message.fileModelRef === "Video" ||
+            (message.fileUrl && (message.fileUrl.startsWith("data:video") || message.fileUrl.includes(".mp4"))));
+    const isFile =
+        !isAudio &&
+        !isImage &&
+        !isVideo &&
+        (message.messageType === "file" ||
+            message.messageType === "document" ||
+            message.fileModelRef === "Document" ||
+            Boolean(message.fileId));
+
+    const fileName =
+        message.fileName ||
+        message.imageDetails?.fileName ||
+        message.videoDetails?.fileName ||
+        message.documentDetails?.fileName ||
+        "Attachment";
+    const fileSize =
+        message.fileSize ||
+        message.imageDetails?.fileSize ||
+        message.videoDetails?.fileSize ||
+        message.documentDetails?.fileSize ||
+        0;
+
     // Resolved local file URL (from memory or IndexedDB registry)
     const [localFileUrl, setLocalFileUrl] = useState(message.fileUrl || "");
 
@@ -64,8 +101,23 @@ export const MessageBubble = ({
                 return;
             }
             getLocalFile(message.fileId).then((record) => {
-                if (isMounted && record?.objectUrl) {
-                    setLocalFileUrl(record.objectUrl);
+                if (isMounted) {
+                    if (record?.objectUrl) {
+                        setLocalFileUrl(record.objectUrl);
+                    } else if (isImage && downloadAndSaveFile) {
+                        // Auto-download image so sender and receiver see the photo directly without clicking
+                        const status = transfer?.status || message.fileTransferStatus;
+                        if (status !== "downloading" && status !== "failed" && status !== "expired") {
+                            downloadAndSaveFile({
+                                fileId: message.fileId,
+                                fileName,
+                                fileType: "image",
+                                fileSize,
+                                messageId: message._id,
+                                isUserGesture: false,
+                            }).catch(() => {});
+                        }
+                    }
                 }
             });
         } else if (message.fileUrl) {
@@ -74,7 +126,7 @@ export const MessageBubble = ({
         return () => {
             isMounted = false;
         };
-    }, [message.fileId, message.fileUrl, fileTransfers?.[message.fileId]?.localUrl]);
+    }, [message.fileId, message.fileUrl, fileTransfers?.[message.fileId]?.localUrl, isImage]);
 
     // Decrypted text for quoted reply message
     const [replyText, setReplyText] = useState(() => {
@@ -513,30 +565,6 @@ export const MessageBubble = ({
         );
     }
 
-    const isAudio =
-        message.messageType === "audio" ||
-        (message.fileUrl &&
-            (message.fileUrl.startsWith("data:audio") ||
-                message.fileUrl.includes("audio/")));
-    const isImage =
-        !isAudio &&
-        (message.messageType === "image" ||
-            message.fileModelRef === "Image" ||
-            (message.fileUrl && message.fileUrl.startsWith("data:image")));
-    const isVideo =
-        !isAudio &&
-        (message.messageType === "video" ||
-            message.fileModelRef === "Video" ||
-            (message.fileUrl && (message.fileUrl.startsWith("data:video") || message.fileUrl.includes(".mp4"))));
-    const isFile =
-        !isAudio &&
-        !isImage &&
-        !isVideo &&
-        (message.messageType === "file" ||
-            message.messageType === "document" ||
-            message.fileModelRef === "Document" ||
-            Boolean(message.fileId));
-
     const transfer = (message.fileId && fileTransfers?.[message.fileId]) || {};
     const effectiveFileStatus =
         transfer.status ||
@@ -545,19 +573,6 @@ export const MessageBubble = ({
     const effectiveProgress = typeof transfer.progress === "number" ? transfer.progress : 0;
     const effectiveLoaded = transfer.loadedBytes || 0;
     const effectiveTotal = transfer.totalBytes || message.fileSize || 0;
-
-    const fileName =
-        message.fileName ||
-        message.imageDetails?.fileName ||
-        message.videoDetails?.fileName ||
-        message.documentDetails?.fileName ||
-        "Attachment";
-    const fileSize =
-        message.fileSize ||
-        message.imageDetails?.fileSize ||
-        message.videoDetails?.fileSize ||
-        message.documentDetails?.fileSize ||
-        0;
     const fileType = isImage ? "image" : isVideo ? "video" : "document";
 
     // Group reactions: { "❤️": { count: 2, users: [...], reactedByMe: true } }
@@ -855,15 +870,30 @@ export const MessageBubble = ({
                                             </div>
                                         )}
                                         {effectiveFileStatus !== "uploading" && (
-                                            <div className="absolute inset-0 bg-black/0 group-hover/img:bg-black/15 transition-colors flex items-center justify-center opacity-0 group-hover/img:opacity-100 pointer-events-none">
-                                                <span className="px-2.5 py-1 rounded-full bg-black/70 text-white text-[11px] font-medium backdrop-blur-md">
-                                                    Click to view
-                                                </span>
+                                            <div
+                                                onClick={() => setShowImagePreview(true)}
+                                                className="absolute top-2.5 right-2.5 p-1.5 rounded-lg bg-black/60 text-white opacity-0 group-hover/img:opacity-100 transition-opacity cursor-pointer hover:bg-black/85 shadow-lg backdrop-blur-xs"
+                                                title="View full photo"
+                                            >
+                                                <svg
+                                                    xmlns="http://www.w3.org/2000/svg"
+                                                    className="w-4 h-4"
+                                                    fill="none"
+                                                    viewBox="0 0 24 24"
+                                                    stroke="currentColor"
+                                                >
+                                                    <path
+                                                        strokeLinecap="round"
+                                                        strokeLinejoin="round"
+                                                        strokeWidth={2}
+                                                        d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"
+                                                    />
+                                                </svg>
                                             </div>
                                         )}
                                     </div>
                                 ) : (
-                                    /* Receiver Download Card with WhatsApp Circular Progress */
+                                    /* Image Auto-Loading Placeholder with Circular Progress */
                                     <div className="w-64 sm:w-72 h-44 rounded-2xl bg-gradient-to-br from-zinc-900/90 to-zinc-950/90 p-3 flex flex-col justify-between relative overflow-hidden">
                                         <div className="flex items-center justify-between text-xs font-semibold text-white/90">
                                             <span className="truncate max-w-[170px]">{fileName}</span>
@@ -887,6 +917,7 @@ export const MessageBubble = ({
                                                         fileType: "image",
                                                         fileSize,
                                                         messageId: message._id,
+                                                        isUserGesture: true,
                                                     })
                                                 }
                                                 onRedownloadAgain={() =>
@@ -903,10 +934,10 @@ export const MessageBubble = ({
 
                                         <div className="text-[10px] text-center text-zinc-400 font-mono">
                                             {effectiveFileStatus === "downloading"
-                                                ? `Downloading image... ${effectiveProgress}%`
+                                                ? `Loading photo... ${effectiveProgress > 0 ? `${effectiveProgress}%` : ""}`
                                                 : effectiveFileStatus === "expired"
                                                 ? "File is no longer available"
-                                                : "Photo • Tap to download"}
+                                                : "Loading photo..."}
                                         </div>
                                     </div>
                                 )}
@@ -1479,10 +1510,10 @@ export const MessageBubble = ({
                 >
                     <div className="absolute top-4 right-4 flex items-center gap-2">
                         <a
-                            href={message.fileUrl}
-                            download={message.fileName || "image.png"}
+                            href={localFileUrl || message.fileUrl || (message.fileId ? `${import.meta.env.VITE_SERVER_URL}/api/files/download/${message.fileId}` : "#")}
+                            download={fileName || message.fileName || "image.png"}
                             onClick={(e) => e.stopPropagation()}
-                            className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold flex items-center gap-1.5 transition-all"
+                            className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
                         >
                             <svg
                                 xmlns="http://www.w3.org/2000/svg"
@@ -1501,23 +1532,24 @@ export const MessageBubble = ({
                             Download
                         </a>
                         <button
+                            type="button"
                             onClick={() => setShowImagePreview(false)}
-                            className="w-9 h-9 rounded-xl bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-all"
+                            className="w-9 h-9 rounded-xl bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-all cursor-pointer"
                         >
                             ✕
                         </button>
                     </div>
 
                     <img
-                        src={message.fileUrl}
-                        alt="Full Preview"
+                        src={localFileUrl || message.fileUrl || (message.fileId ? `${import.meta.env.VITE_SERVER_URL}/api/files/download/${message.fileId}` : "")}
+                        alt={fileName || "Full Preview"}
                         onClick={(e) => e.stopPropagation()}
                         className="max-h-[85vh] max-w-[90vw] object-contain rounded-2xl shadow-2xl ring-1 ring-white/10"
                     />
 
-                    {message.fileName && (
+                    {fileName && (
                         <p className="text-xs text-zinc-400 mt-3 font-mono">
-                            {message.fileName}
+                            {fileName}
                         </p>
                     )}
                 </div>

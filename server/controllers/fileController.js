@@ -172,6 +172,8 @@ export const uploadFile = async (req, res) => {
         ? "Video"
         : "Document";
 
+    const fileDownloadUrl = `/api/files/download/${fileId}`;
+
     const message = await Message.create({
       conversation: conversationId,
       sender: req.user._id,
@@ -179,6 +181,7 @@ export const uploadFile = async (req, res) => {
       text: caption ? caption.trim() : "",
       messageType: fileType,
       fileId,
+      fileUrl: fileDownloadUrl,
       fileName: originalName,
       fileSize,
       fileTransferStatus: "pending_delivery",
@@ -495,8 +498,9 @@ export const acknowledgeDownload = async (req, res) => {
       );
     }
 
-    // Immediately delete temporary encrypted file from server disk
-    await deleteTemporaryFile(fileId);
+    // Do not delete file immediately here so sender, receiver, and multiple devices
+    // can view and re-download during the retention period.
+    // Temporary file is cleaned up automatically when expiresAt passes by cleanupExpiredFiles.
 
     // Notify sender and receiver via socket
     const io = req.app.get("io");
@@ -516,7 +520,7 @@ export const acknowledgeDownload = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: "Download acknowledged. Temporary server copy deleted.",
+      message: "Download acknowledged.",
       fileId,
       status: "downloaded",
     });

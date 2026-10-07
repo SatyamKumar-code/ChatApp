@@ -163,7 +163,7 @@ export const cleanupExpiredFiles = async (io = null) => {
     const now = new Date();
     const expiredDeliveries = await PendingFileDelivery.find({
       expiresAt: { $lte: now },
-      status: { $nin: ["expired", "downloaded", "completed"] },
+      status: { $ne: "expired" },
     });
 
     if (expiredDeliveries.length > 0) {
