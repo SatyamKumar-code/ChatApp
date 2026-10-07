@@ -1,4 +1,4 @@
-const CACHE_NAME = "chatapp-shell-v10";
+const CACHE_NAME = "chatapp-shell-v11";
 const STATIC_ASSETS = [
     "/",
     "/index.html",
@@ -268,11 +268,13 @@ self.addEventListener("push", (event) => {
                     bodyText = await decryptEncryptedBody(bodyText, payload.conversationId);
                 }
 
+                const messageUniqueTag = `msg-${payload.messageId || `${payload.conversationId || "conv"}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`}`;
+
                 const messageNotificationOptions = {
                     body: bodyText,
                     icon: safeIcon,
                     badge: defaultBadge,
-                    tag: `msg-${payload.conversationId || "general"}`,
+                    tag: messageUniqueTag,
                     renotify: true,
                     vibrate: [150, 80, 150],
                     data: {
@@ -301,7 +303,7 @@ self.addEventListener("push", (event) => {
                     notifPromise = self.registration.showNotification(title, {
                         body: bodyText,
                         icon: defaultIcon,
-                        tag: `msg-${payload.conversationId || "general"}`,
+                        tag: messageUniqueTag,
                     });
                 }
 
@@ -390,4 +392,16 @@ self.addEventListener("notificationclick", (event) => {
 // Handle Notification Close Event
 self.addEventListener("notificationclose", (event) => {
     console.log("[SW] Notification closed by user:", event.notification.tag);
+});
+
+// Handle local notification requests dispatched from active app window
+self.addEventListener("message", (event) => {
+    if (event.data && event.data.type === "SHOW_NOTIFICATION") {
+        const { title, options } = event.data;
+        if (title && self.registration && self.registration.showNotification) {
+            self.registration.showNotification(title, options).catch((err) => {
+                console.warn("[SW] Local notification from message event failed:", err);
+            });
+        }
+    }
 });

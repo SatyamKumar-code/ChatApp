@@ -128,7 +128,7 @@ export const sendPushToUser = async (userId, payload, pushOptions = {}) => {
         const expiredEndpoints = [];
 
         const defaultOptions = {
-            TTL: 60 * 60, // 1 hour default TTL
+            TTL: 3 * 24 * 60 * 60, // 3 days default TTL so offline devices retain messages
             urgency: "high",
             ...pushOptions,
         };
@@ -231,7 +231,7 @@ export const sendMessagePush = async ({
     };
 
     return sendPushToMultipleUsers(recipientIds, payload, {
-        TTL: 24 * 60 * 60, // 24 hours
+        TTL: 3 * 24 * 60 * 60, // 3 days (72 hours)
         urgency: "high",
     });
 };

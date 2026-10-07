@@ -167,17 +167,32 @@ const setupSocket = (io) => {
     // ==============================
     // ON CONNECT: DELIVER PENDING MESSAGES
     // ==============================
-    // Mark all undelivered messages sent TO this user as delivered
+    // Mark all undelivered messages sent TO this user as delivered, notify senders, and emit to receiver!
     try {
+      const userConvs = await Conversation.find({
+        participants: userId,
+      }).select("_id").lean();
+      const userConvIds = userConvs.map((c) => c._id);
+
       const undeliveredMessages = await Message.find({
-        receiver: userId,
-        isDelivered: false,
-      });
+        $or: [
+          { receiver: userId, isDelivered: false },
+          { conversation: { $in: userConvIds }, sender: { $ne: userId }, isDelivered: false },
+        ],
+        deletedFor: { $nin: [userId] },
+      })
+        .populate("sender", "name phone profilePicture isOnline")
+        .populate("receiver", "name phone profilePicture isOnline")
+        .populate("reactions.user", "name profilePicture")
+        .populate({
+          path: "replyTo",
+          select: "text messageType fileName fileUrl sender",
+          populate: { path: "sender", select: "name" },
+        })
+        .sort({ createdAt: 1 });
 
       if (undeliveredMessages.length > 0) {
-        const messageIds = undeliveredMessages.map(
-          (msg) => msg._id
-        );
+        const messageIds = undeliveredMessages.map((msg) => msg._id);
 
         await Message.updateMany(
           { _id: { $in: messageIds } },
@@ -187,34 +202,39 @@ const setupSocket = (io) => {
         // Group by sender and notify each sender
         const senderGroups = {};
         for (const msg of undeliveredMessages) {
-          const senderId = msg.sender.toString();
+          const senderId = (msg.sender?._id || msg.sender).toString();
           if (!senderGroups[senderId]) {
             senderGroups[senderId] = [];
           }
           senderGroups[senderId].push({
             messageId: msg._id.toString(),
-            conversationId: msg.conversation.toString(),
+            conversationId: (msg.conversation?._id || msg.conversation).toString(),
           });
         }
 
         for (const [senderId, deliveredMsgs] of Object.entries(senderGroups)) {
-          io.to(`user:${senderId}`).emit(
-            "message:delivered",
-            {
-              messages: deliveredMsgs,
-            }
-          );
+          io.to(`user:${senderId}`).emit("message:delivered", {
+            messages: deliveredMsgs,
+          });
         }
 
+        // Emit each pending offline message to the newly connected receiver socket
+        for (const msg of undeliveredMessages) {
+          socket.emit("newMessage", msg);
+        }
+
+        // Also emit a dedicated batch event so client can pop up all OS notifications together
+        socket.emit("messages:offline_batch", {
+          messages: undeliveredMessages,
+          count: undeliveredMessages.length,
+        });
+
         console.log(
-          `Delivered ${messageIds.length} pending messages for ${socket.user.name}`
+          `Delivered and pushed ${messageIds.length} pending offline messages to ${socket.user.name}`
         );
       }
     } catch (error) {
-      console.error(
-        "Error delivering pending messages:",
-        error
-      );
+      console.error("Error delivering pending messages:", error);
     }
 
     // ==============================

@@ -25,6 +25,7 @@ import {
     hasStoredDirectoryHandle,
     promptSelectChatAppDirectory,
 } from "../services/fileSystemStorage";
+import { showNativeOSNotification } from "../services/pushNotificationService";
 
 export const ChatContext = createContext();
 
@@ -518,6 +519,92 @@ const ChatProvider = ({ children }) => {
             if (msgSenderId && msgSenderId !== myId) {
                 playMessageSound();
             }
+
+            // Trigger OS-level notification if user is not actively viewing this conversation
+            if (
+                isFromOtherSender &&
+                (typeof document === "undefined" || !document.hasFocus() || !isForActiveConversation)
+            ) {
+                const senderName = decryptedMessage.sender?.name || message.sender?.name || "Someone";
+                const senderAvatar = decryptedMessage.sender?.profilePicture || message.sender?.profilePicture || "";
+
+                let bodyText = "New message";
+                if (decryptedMessage.messageType === "image") bodyText = "📷 Photo";
+                else if (decryptedMessage.messageType === "video") bodyText = "🎥 Video";
+                else if (decryptedMessage.messageType === "audio") bodyText = "🎤 Voice message";
+                else if (decryptedMessage.messageType === "file" || decryptedMessage.messageType === "document") {
+                    bodyText = decryptedMessage.fileName ? `📄 ${decryptedMessage.fileName}` : "📄 Document";
+                } else if (decryptedMessage.text) {
+                    bodyText = decryptedMessage.text.length > 80 ? `${decryptedMessage.text.substring(0, 80)}...` : decryptedMessage.text;
+                }
+
+                const msgIdStr = (decryptedMessage._id || message._id)?.toString();
+
+                showNativeOSNotification({
+                    title: senderName,
+                    body: bodyText,
+                    icon: senderAvatar,
+                    tag: `msg-${msgIdStr}`,
+                    conversationId: convId,
+                    messageId: msgIdStr,
+                }).catch((e) => console.warn("Failed to show OS notification:", e));
+            }
+        };
+
+        // ==============================
+        // OFFLINE MESSAGES BATCH HANDLER (ON RECONNECT)
+        // ==============================
+        const handleOfflineBatch = async (data) => {
+            const { messages: offlineMsgs } = data || {};
+            if (!Array.isArray(offlineMsgs) || offlineMsgs.length === 0) return;
+
+            console.log(`[ChatContext] Processing ${offlineMsgs.length} offline batch messages on reconnect`);
+
+            // Play notification chime once for incoming batch
+            playMessageSound();
+
+            const myCurrentId = (user?._id || user?.id)?.toString();
+
+            for (let i = 0; i < offlineMsgs.length; i++) {
+                const rawMsg = offlineMsgs[i];
+                const convId = (rawMsg.conversation?._id || rawMsg.conversation)?.toString();
+                const senderIdStr = (rawMsg.sender?._id || rawMsg.sender)?.toString();
+
+                // Skip if sent by me
+                if (senderIdStr && myCurrentId && senderIdStr === myCurrentId) continue;
+
+                const decrypted = await decryptMsgPayload(rawMsg, convId);
+                const senderName = decrypted.sender?.name || rawMsg.sender?.name || "Someone";
+                const senderAvatar = decrypted.sender?.profilePicture || rawMsg.sender?.profilePicture || "";
+
+                let bodyText = "New message";
+                if (decrypted.messageType === "image") bodyText = "📷 Photo";
+                else if (decrypted.messageType === "video") bodyText = "🎥 Video";
+                else if (decrypted.messageType === "audio") bodyText = "🎤 Voice message";
+                else if (decrypted.messageType === "file" || decrypted.messageType === "document") {
+                    bodyText = decrypted.fileName ? `📄 ${decrypted.fileName}` : "📄 Document";
+                } else if (decrypted.text) {
+                    bodyText = decrypted.text.length > 80 ? `${decrypted.text.substring(0, 80)}...` : decrypted.text;
+                }
+
+                const msgIdStr = (decrypted._id || rawMsg._id)?.toString();
+
+                // Stagger each OS notification slightly (120ms) so Windows notification center pops up each toast cleanly!
+                setTimeout(() => {
+                    showNativeOSNotification({
+                        title: senderName,
+                        body: bodyText,
+                        icon: senderAvatar,
+                        tag: `msg-${msgIdStr}`,
+                        conversationId: convId,
+                        messageId: msgIdStr,
+                    }).catch((e) => console.warn("Failed to show OS notification for offline message:", e));
+                }, i * 120);
+            }
+
+            // Immediately refresh conversations and contacts to reflect updated unread counts
+            getConversations();
+            getContacts();
         };
 
         // ==============================
@@ -1019,6 +1106,9 @@ const ChatProvider = ({ children }) => {
         socket.on("group:created", handleGroupCreated);
         socket.on("group:removed", handleGroupRemoved);
 
+        // Offline batch messages on reconnect listener
+        socket.on("messages:offline_batch", handleOfflineBatch);
+
         // Offline file delivery listeners
         socket.on("file:pending_list", handleFilePendingList);
         socket.on("file:available", handleFileAvailable);
@@ -1032,6 +1122,7 @@ const ChatProvider = ({ children }) => {
             socket.off("connect_error", handleConnectError);
             socket.off("disconnect", handleDisconnect);
             socket.off("newMessage", handleNewMessage);
+            socket.off("messages:offline_batch", handleOfflineBatch);
             socket.off("message:delivered", handleMessageDelivered);
             socket.off("message:seen", handleMessageSeen);
             socket.off("message:reactionUpdated", handleReactionUpdated);

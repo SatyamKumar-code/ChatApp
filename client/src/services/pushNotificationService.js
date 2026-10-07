@@ -190,3 +190,71 @@ export const syncPushSubscriptionIfGranted = async () => {
         }
     }
 };
+
+/**
+ * Trigger an OS-level notification on the device (desktop / mobile)
+ * Works via ServiceWorker registration or standard Web Notification API
+ */
+export const showNativeOSNotification = async ({
+    title,
+    body,
+    icon,
+    tag,
+    conversationId,
+    messageId,
+}) => {
+    if (typeof window === "undefined" || !("Notification" in window)) return;
+    if (Notification.permission !== "granted") return;
+
+    const defaultIcon = "/pwa-192x192.png";
+    const safeIcon =
+        icon && (icon.startsWith("http://") || icon.startsWith("https://") || icon.startsWith("data:"))
+            ? icon
+            : defaultIcon;
+
+    const notifTag =
+        tag ||
+        `msg-${messageId || `${conversationId || "conv"}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`}`;
+
+    const options = {
+        body: body || "New message received",
+        icon: safeIcon,
+        badge: defaultIcon,
+        tag: notifTag,
+        renotify: true,
+        vibrate: [150, 80, 150],
+        data: {
+            type: "MESSAGE",
+            conversationId: conversationId || "",
+            messageId: messageId || "",
+            url: conversationId ? `/?conversationId=${conversationId}` : "/",
+        },
+        actions: [{ action: "open", title: "Open Chat 💬" }],
+    };
+
+    // 1. Try Service Worker registration first (standard for PWAs and OS integration)
+    try {
+        if ("serviceWorker" in navigator) {
+            const reg = await navigator.serviceWorker.ready;
+            if (reg && reg.showNotification) {
+                await reg.showNotification(title || "ChatApp", options);
+                return;
+            }
+        }
+    } catch (swErr) {
+        console.warn("[PushService] SW showNotification failed, trying Notification constructor:", swErr);
+    }
+
+    // 2. Fallback to standard Window Notification
+    try {
+        const notif = new Notification(title || "ChatApp", options);
+        notif.onclick = () => {
+            window.focus();
+            if (options.data?.url) {
+                window.location.href = options.data.url;
+            }
+        };
+    } catch (notifErr) {
+        console.warn("[PushService] Native Notification constructor failed:", notifErr);
+    }
+};
