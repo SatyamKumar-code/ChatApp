@@ -191,6 +191,7 @@ export const sendMessagePush = async ({
         messageId: message._id ? message._id.toString() : "",
         body: preview,
         timestamp: message.createdAt || new Date().toISOString(),
+        serverUrl: process.env.BACKEND_URL || "http://localhost:5000",
     };
 
     return sendPushToMultipleUsers(recipientIds, payload, {
@@ -219,6 +220,7 @@ export const sendCallPush = async ({
         callerPhone: caller?.phone || "",
         conversationId: conversationId ? conversationId.toString() : "",
         timestamp: Date.now(),
+        serverUrl: process.env.BACKEND_URL || "http://localhost:5000",
     };
 
     return sendPushToUser(receiverId, payload, {

@@ -516,7 +516,24 @@ const ChatProvider = ({ children }) => {
                 return updated;
             });
 
-            // Update conversation list to reflect delivered status
+            // Immediately update sidebar conversation list
+            setConversations((prev) =>
+                prev.map((c) => {
+                    const lastId = (c.lastMessage?._id?.toString() || c.lastMessage?.tempId?.toString());
+                    if (lastId && deliveredSet.has(lastId)) {
+                        return {
+                            ...c,
+                            lastMessage: {
+                                ...c.lastMessage,
+                                isDelivered: true,
+                            },
+                        };
+                    }
+                    return c;
+                })
+            );
+
+            // Refresh conversation list from backend
             getConversations();
         };
 

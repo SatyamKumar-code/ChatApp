@@ -7,6 +7,7 @@ import {
     getSubscriptionStatus,
     sendTestPush,
     handleCallRejectFromPush,
+    handlePushDeliveryAck,
 } from "../controllers/pushController.js";
 import jwt from "jsonwebtoken";
 import UserModel from "../models/User.js";
@@ -45,5 +46,6 @@ router.post("/unsubscribe", protect, unsubscribeUser);
 router.get("/status", protect, getSubscriptionStatus);
 router.post("/test", protect, sendTestPush);
 router.post("/call-reject", softProtect, handleCallRejectFromPush);
+router.post("/delivery-ack", softProtect, handlePushDeliveryAck);
 
 export default router;

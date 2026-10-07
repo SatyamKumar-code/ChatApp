@@ -1,5 +1,6 @@
 import PushSubscription from "../models/PushSubscription.js";
 import Call from "../models/Call.js";
+import Message from "../models/Message.js";
 import { sendPushToUser, sanitizeAvatarUrl } from "../services/pushService.js";
 
 /**
@@ -158,5 +159,49 @@ export const handleCallRejectFromPush = async (req, res) => {
     } catch (err) {
         console.error("Handle call reject error:", err);
         res.status(500).json({ success: false, message: err.message });
+    }
+};
+
+/**
+ * Handle delivery acknowledgement when Service Worker receives a Web Push notification
+ */
+export const handlePushDeliveryAck = async (req, res) => {
+    try {
+        const { messageId, conversationId } = req.body;
+        if (!messageId) {
+            return res.status(400).json({ success: false, message: "messageId required" });
+        }
+
+        const message = await Message.findById(messageId);
+        if (!message) {
+            return res.status(404).json({ success: false, message: "Message not found" });
+        }
+
+        if (!message.isDelivered && !message.isSeen) {
+            message.isDelivered = true;
+            if (!message.deliveredAt) {
+                message.deliveredAt = new Date();
+            }
+            await message.save();
+
+            const io = req.app.get("io");
+            if (io && message.sender) {
+                const senderId = (message.sender._id || message.sender).toString();
+                io.to(`user:${senderId}`).emit("message:delivered", {
+                    messages: [
+                        {
+                            messageId: message._id.toString(),
+                            conversationId: (message.conversation?._id || message.conversation || conversationId).toString(),
+                        },
+                    ],
+                });
+                console.log(`[PushDeliveryAck] Double tick emitted to sender ${senderId} for message ${messageId}`);
+            }
+        }
+
+        return res.status(200).json({ success: true, message: "Delivery acknowledged" });
+    } catch (err) {
+        console.error("[PushDeliveryAck] Error acknowledging delivery:", err);
+        return res.status(500).json({ success: false, message: err.message });
     }
 };

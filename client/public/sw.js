@@ -1,4 +1,4 @@
-const CACHE_NAME = "chatapp-shell-v6";
+const CACHE_NAME = "chatapp-shell-v9";
 const STATIC_ASSETS = [
     "/",
     "/index.html",
@@ -10,6 +10,17 @@ const STATIC_ASSETS = [
     "/pwa-512x512.png",
     "/apple-touch-icon.png",
 ];
+
+// Helper to reliably resolve backend API endpoint (handles localhost:5173 -> localhost:5000)
+const getBackendApiUrl = (endpoint, payloadServerUrl) => {
+    if (payloadServerUrl && typeof payloadServerUrl === "string") {
+        return `${payloadServerUrl.replace(/\/+$/, "")}${endpoint}`;
+    }
+    if (self.location && self.location.port === "5173") {
+        return `http://localhost:5000${endpoint}`;
+    }
+    return endpoint;
+};
 
 // Install: Cache core application shell
 self.addEventListener("install", (event) => {
@@ -228,16 +239,35 @@ self.addEventListener("push", (event) => {
                     });
                 });
 
+                let notifPromise;
                 try {
-                    return await self.registration.showNotification(title, messageNotificationOptions);
+                    notifPromise = self.registration.showNotification(title, messageNotificationOptions);
                 } catch (notifErr) {
                     console.warn("[SW] Advanced message notification failed, showing basic fallback:", notifErr);
-                    return await self.registration.showNotification(title, {
+                    notifPromise = self.registration.showNotification(title, {
                         body: payload.body || "New message received",
                         icon: defaultIcon,
                         tag: `msg-${payload.conversationId || "general"}`,
                     });
                 }
+
+                // Send delivery-ack to server ONLY AFTER OS notification is successfully displayed on device screen!
+                return notifPromise.then(() => {
+                    if (payload.messageId) {
+                        const ackUrl = getBackendApiUrl("/api/push/delivery-ack", payload.serverUrl);
+                        return fetch(ackUrl, {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                                messageId: payload.messageId,
+                                conversationId: payload.conversationId || "",
+                            }),
+                            credentials: "include",
+                        })
+                            .then((res) => console.log("[SW] Delivery ack sent successfully, status:", res.status))
+                            .catch((ackErr) => console.warn("[SW] Delivery ack failed:", ackErr));
+                    }
+                });
             }
         })()
     );
@@ -255,8 +285,9 @@ self.addEventListener("notificationclick", (event) => {
 
     // Handle Call Reject Action
     if (action === "reject") {
+        const rejectUrl = getBackendApiUrl("/api/push/call-reject", notifData.serverUrl);
         event.waitUntil(
-            fetch("/api/push/call-reject", {
+            fetch(rejectUrl, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
