@@ -33,17 +33,43 @@ const storage = multer.diskStorage({
   },
 });
 
+// Dangerous executable extensions blacklist for security
+const DANGEROUS_EXTENSIONS = new Set([
+  ".exe", ".bat", ".cmd", ".sh", ".vbs", ".msi", ".scr", ".com",
+  ".pif", ".application", ".gadget", ".hta", ".cpl", ".msc", ".jar", ".ps1"
+]);
+
 const upload = multer({
   storage,
   limits: {
     fileSize: 1024 * 1024 * 1024, // 1 GB limit
   },
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname || "").toLowerCase();
+    if (DANGEROUS_EXTENSIONS.has(ext)) {
+      return cb(new Error("Executable and script files are not allowed for security reasons"), false);
+    }
+    cb(null, true);
+  },
 });
+
+const uploadSingle = (req, res, next) => {
+  upload.single("file")(req, res, (err) => {
+    if (err) {
+      console.error("[Multer Upload Error]:", err);
+      return res.status(400).json({
+        success: false,
+        message: err.message || "File upload failed",
+      });
+    }
+    next();
+  });
+};
 
 const router = Router();
 
 // Upload file for delivery (creates temporary encrypted storage + models)
-router.post("/upload", protect, upload.single("file"), uploadFile);
+router.post("/upload", protect, uploadSingle, uploadFile);
 
 // Get pending file deliveries for current user
 router.get("/pending", protect, getPendingDeliveries);
@@ -58,7 +84,7 @@ router.post("/acknowledge/:fileId", protect, acknowledgeDownload);
 router.post("/redownload-request/:fileId", protect, requestRedownload);
 
 // Sender re-uploading original file on recovery request
-router.post("/reupload", protect, upload.single("file"), reuploadFile);
+router.post("/reupload", protect, uploadSingle, reuploadFile);
 
 // Sender reporting original file missing
 router.post("/reupload-failed", protect, reportReuploadFailed);

@@ -1382,17 +1382,15 @@ const ChatProvider = ({ children }) => {
             ? null
             : (selectedConversation.user?._id || selectedConversation.user);
 
-        // 1. Immediately store sender's original file in local registry
-        try {
-            await saveSenderOriginal(fileId, file, {
-                fileType: detectedType,
-                fileName: file.name,
-                fileSize: file.size,
-                mimeType: mime,
-            });
-        } catch (e) {
-            console.error("Failed to save sender original file:", e);
-        }
+        // 1. Store sender's original file in local registry (non-blocking)
+        saveSenderOriginal(fileId, file, {
+            fileType: detectedType,
+            fileName: file.name,
+            fileSize: file.size,
+            mimeType: mime,
+        }).catch((e) => {
+            console.warn("Failed to save sender original file:", e);
+        });
 
         // 2. Create local object URL for instant preview on sender device
         const localPreviewUrl = URL.createObjectURL(file);
@@ -1476,7 +1474,7 @@ const ChatProvider = ({ children }) => {
         if (height) formData.append("height", height);
         if (duration) formData.append("duration", duration);
         if (pageCount) formData.append("pageCount", pageCount);
-        formData.append("originalSenderPath", getLocalPCPath(file.name, detectedType));
+        formData.append("originalSenderPath", getLocalPCPath(file.name, detectedType, "Send"));
 
         return new Promise((resolve, reject) => {
             const xhr = new XMLHttpRequest();
@@ -1577,17 +1575,21 @@ const ChatProvider = ({ children }) => {
         if (!fileId) return;
 
         // Check if already in local registry
-        const existing = await getLocalFile(fileId);
-        if (existing && existing.objectUrl) {
-            setFileTransfers((prev) => ({
-                ...prev,
-                [fileId]: {
-                    status: "downloaded",
-                    progress: 100,
-                    localUrl: existing.objectUrl,
-                },
-            }));
-            return existing.objectUrl;
+        try {
+            const existing = await getLocalFile(fileId);
+            if (existing && existing.objectUrl) {
+                setFileTransfers((prev) => ({
+                    ...prev,
+                    [fileId]: {
+                        status: "downloaded",
+                        progress: 100,
+                        localUrl: existing.objectUrl,
+                    },
+                }));
+                return existing.objectUrl;
+            }
+        } catch (e) {
+            console.warn("Error checking existing local file:", e);
         }
 
         setFileTransfers((prev) => ({
@@ -1627,7 +1629,7 @@ const ChatProvider = ({ children }) => {
                     try {
                         const blob = xhr.response;
 
-                        // 1. Save permanently to local IndexedDB registry
+                        // 1. Save permanently to local IndexedDB registry & native disk if permitted
                         const saved = await saveLocalFile({
                             fileId,
                             messageId,
@@ -1636,10 +1638,17 @@ const ChatProvider = ({ children }) => {
                             fileType,
                             mimeType: blob.type,
                             fileSize: blob.size,
+                            direction: "Received",
                         });
 
-                        // 2. Trigger browser download to device PC (Downloads/ChatApp/...)
-                        triggerDeviceDownload(blob, fileName, fileType);
+                        // 2. Trigger browser download ONLY if not saved to local ChatApp folder structure
+                        // and File System Access API is completely unsupported (e.g. mobile)
+                        if (!saved?.savedToDisk) {
+                            const hasFsApi = typeof window !== "undefined" && typeof window.showDirectoryPicker === "function";
+                            if (!hasFsApi) {
+                                triggerDeviceDownload(blob, fileName, fileType, "Received");
+                            }
+                        }
 
                         // 3. Acknowledge download completion so server deletes temporary encrypted copy!
                         api.post(`/files/acknowledge/${fileId}`).catch(() => {});

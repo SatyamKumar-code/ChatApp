@@ -5,6 +5,13 @@ import Modal from "../common/Modal";
 import ProfilePhotoUpload from "./ProfilePhotoUpload";
 import { playMessageSound } from "../../utils/callSounds";
 import { usePwa } from "../../context/PwaContext";
+import {
+    isFileSystemAccessSupported,
+    promptSelectChatAppDirectory,
+    getStoredDirectoryHandle,
+    clearStoredDirectoryHandle,
+} from "../../services/fileSystemStorage";
+import { getLocalFileStats } from "../../services/localFileRegistry";
 
 export const SettingsModal = ({ isOpen, onClose }) => {
     const { user, updateProfile, logout } = useContext(AuthContext);
@@ -40,6 +47,39 @@ export const SettingsModal = ({ isOpen, onClose }) => {
     });
 
     const { isInstalled, canPromptDirectly, triggerInstall, openInstallModal, os, deviceLabel } = usePwa();
+
+    // Local Storage & File System Access state
+    const [directoryHandle, setDirectoryHandle] = useState(null);
+    const [storageStats, setStorageStats] = useState(null);
+    const [storageStatusMsg, setStorageStatusMsg] = useState("");
+    const fsSupported = isFileSystemAccessSupported();
+
+    React.useEffect(() => {
+        if (isOpen && activeTab === "storage") {
+            getStoredDirectoryHandle().then((handle) => setDirectoryHandle(handle));
+            getLocalFileStats().then((stats) => setStorageStats(stats));
+        }
+    }, [isOpen, activeTab]);
+
+    const handleSelectDirectory = async () => {
+        try {
+            setStorageStatusMsg("");
+            const handle = await promptSelectChatAppDirectory();
+            if (handle) {
+                setDirectoryHandle(handle);
+                setStorageStatusMsg(`Connected storage folder: "${handle.name}"`);
+            }
+        } catch (err) {
+            console.error("Select directory error:", err);
+            setStorageStatusMsg("Failed to link folder: " + (err.message || ""));
+        }
+    };
+
+    const handleDisconnectDirectory = async () => {
+        await clearStoredDirectoryHandle();
+        setDirectoryHandle(null);
+        setStorageStatusMsg("Reverted to default browser Downloads fallback.");
+    };
 
     // When modal opens or user changes, sync form
     React.useEffect(() => {
@@ -267,6 +307,33 @@ export const SettingsModal = ({ isOpen, onClose }) => {
                             />
                         </svg>
                         Account
+                    </button>
+
+                    {/* Local Storage & Files Tab */}
+                    <button
+                        type="button"
+                        onClick={() => setActiveTab("storage")}
+                        className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-medium transition-all cursor-pointer ${
+                            activeTab === "storage"
+                                ? "bg-purple-600/20 text-purple-300 font-semibold border border-purple-500/30"
+                                : "text-zinc-400 hover:text-white hover:bg-white/5"
+                        }`}
+                    >
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            className="w-4 h-4 shrink-0 text-cyan-400"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                        >
+                            <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
+                            />
+                        </svg>
+                        Storage & Files
                     </button>
 
                     {/* App Download Tab */}
@@ -735,6 +802,129 @@ export const SettingsModal = ({ isOpen, onClose }) => {
                                     Log Out of ChatApp
                                 </button>
                             </div>
+                        </div>
+                    )}
+
+                    {/* ===== 5B. STORAGE & FILES TAB ===== */}
+                    {activeTab === "storage" && (
+                        <div className="space-y-4">
+                            <div className="bg-[#181830] p-4 rounded-xl border border-white/5 space-y-3">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2.5">
+                                        <div className="w-8 h-8 rounded-lg bg-cyan-500/20 text-cyan-300 flex items-center justify-center">
+                                            <svg
+                                                xmlns="http://www.w3.org/2000/svg"
+                                                className="w-4 h-4"
+                                                fill="none"
+                                                viewBox="0 0 24 24"
+                                                stroke="currentColor"
+                                            >
+                                                <path
+                                                    strokeLinecap="round"
+                                                    strokeLinejoin="round"
+                                                    strokeWidth={2}
+                                                    d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
+                                                />
+                                            </svg>
+                                        </div>
+                                        <div>
+                                            <h4 className="text-xs font-semibold text-white">Local Directory Structure</h4>
+                                            <p className="text-[11px] text-zinc-400">Automatic organization for Sent & Received files</p>
+                                        </div>
+                                    </div>
+
+                                    <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${
+                                        fsSupported && directoryHandle
+                                            ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                                            : "bg-purple-500/10 text-purple-300 border-purple-500/30"
+                                    }`}>
+                                        {fsSupported && directoryHandle ? "Native FS Linked" : "Browser Downloads"}
+                                    </span>
+                                </div>
+
+                                {/* Folder Layout Diagram */}
+                                <div className="p-3 rounded-lg bg-black/30 font-mono text-[11px] text-zinc-300 border border-white/5 space-y-1">
+                                    <div className="text-cyan-300 font-bold">ChatApp/</div>
+                                    <div className="pl-4 text-purple-300">├── Send/</div>
+                                    <div className="pl-8 text-zinc-400">├── ChatApp_image/</div>
+                                    <div className="pl-8 text-zinc-400">├── ChatApp_video/</div>
+                                    <div className="pl-8 text-zinc-400">└── ChatApp_document/</div>
+                                    <div className="pl-4 text-emerald-300">└── Received/</div>
+                                    <div className="pl-8 text-zinc-400">├── ChatApp_image/</div>
+                                    <div className="pl-8 text-zinc-400">├── ChatApp_video/</div>
+                                    <div className="pl-8 text-zinc-400">└── ChatApp_document/</div>
+                                </div>
+
+                                {storageStatusMsg && (
+                                    <div className="p-2 rounded-lg bg-purple-600/20 text-purple-200 text-xs border border-purple-500/30">
+                                        {storageStatusMsg}
+                                    </div>
+                                )}
+
+                                {/* File System Access API controls */}
+                                {fsSupported ? (
+                                    <div className="pt-1 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
+                                        <div>
+                                            <div className="text-xs text-white font-medium">
+                                                {directoryHandle
+                                                    ? `Connected Folder: "${directoryHandle.name}"`
+                                                    : "No custom folder selected"}
+                                            </div>
+                                            <p className="text-[11px] text-zinc-400">
+                                                {directoryHandle
+                                                    ? "Files automatically save to Send & Received subfolders."
+                                                    : "Select a folder to enable direct native disk saving."}
+                                            </p>
+                                        </div>
+
+                                        <div className="flex items-center gap-2 shrink-0">
+                                            <button
+                                                type="button"
+                                                onClick={handleSelectDirectory}
+                                                className="px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-xs font-medium transition-all shadow-sm"
+                                            >
+                                                {directoryHandle ? "Change Folder" : "Select ChatApp Folder"}
+                                            </button>
+                                            {directoryHandle && (
+                                                <button
+                                                    type="button"
+                                                    onClick={handleDisconnectDirectory}
+                                                    className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium transition-all border border-white/10"
+                                                >
+                                                    Disconnect
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="p-2.5 rounded-lg bg-zinc-800/60 border border-white/5 text-xs text-zinc-300">
+                                        Mobile/Browser Mode: Files are saved using the standard browser Downloads mechanism and cached permanently in the local offline registry.
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Storage Statistics Card */}
+                            {storageStats && (
+                                <div className="bg-[#181830] p-4 rounded-xl border border-white/5 space-y-3">
+                                    <h4 className="text-xs font-semibold text-white">Registry Storage Statistics</h4>
+                                    <div className="grid grid-cols-2 gap-3 text-xs">
+                                        <div className="p-3 rounded-lg bg-black/20 border border-white/5">
+                                            <div className="text-zinc-400 text-[11px]">Total Local Files</div>
+                                            <div className="text-lg font-bold text-white mt-0.5">{storageStats.totalFiles}</div>
+                                            <div className="text-[10px] text-zinc-400 mt-0.5 font-mono">
+                                                {(storageStats.totalBytes / (1024 * 1024)).toFixed(1)} MB stored
+                                            </div>
+                                        </div>
+                                        <div className="p-3 rounded-lg bg-black/20 border border-white/5">
+                                            <div className="text-zinc-400 text-[11px]">Send vs Received</div>
+                                            <div className="text-xs text-zinc-300 mt-1 space-y-0.5">
+                                                <div>Send: <span className="text-purple-300 font-semibold">{storageStats.send.count}</span> ({storageStats.send.image} img, {storageStats.send.video} vid, {storageStats.send.document} doc)</div>
+                                                <div>Received: <span className="text-emerald-300 font-semibold">{storageStats.received.count}</span> ({storageStats.received.image} img, {storageStats.received.video} vid, {storageStats.received.document} doc)</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     )}
 

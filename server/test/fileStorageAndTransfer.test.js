@@ -14,6 +14,8 @@ const {
 const {
     uploadFile,
     reportReuploadFailed,
+    sanitizeFileName,
+    detectCanonicalFileType,
 } = await import('../controllers/fileController.js');
 
 function buildReq(overrides = {}) {
@@ -43,6 +45,51 @@ function buildRes() {
 }
 
 describe('fileStorageService & fileController – File Storage & Offline Transfers', () => {
+    describe('Filename Sanitization & Security', () => {
+        it('strips directory traversal ../ and ..\\ patterns', () => {
+            const result = sanitizeFileName('../../etc/passwd.jpg');
+            assert.ok(!result.includes('..'));
+            assert.ok(!result.includes('/'));
+            assert.equal(result, 'etc_passwd.jpg');
+        });
+
+        it('replaces illegal characters (< > : " / \\ | ? *) with underscore', () => {
+            const result = sanitizeFileName('invoice:2026*final?.pdf');
+            assert.equal(result, 'invoice_2026_final_.pdf');
+        });
+
+        it('strips null bytes and control characters', () => {
+            const result = sanitizeFileName('safe\x00file\x1f.png');
+            assert.equal(result, 'safefile.png');
+        });
+
+        it('defaults to attachment when given empty or null string', () => {
+            assert.equal(sanitizeFileName(''), 'attachment');
+            assert.equal(sanitizeFileName(null), 'attachment');
+            assert.equal(sanitizeFileName(undefined), 'attachment');
+        });
+    });
+
+    describe('Canonical File Category Detection', () => {
+        it('identifies image MIME types and extensions', () => {
+            assert.equal(detectCanonicalFileType('image/jpeg', 'photo.jpg'), 'image');
+            assert.equal(detectCanonicalFileType('', 'picture.png'), 'image');
+            assert.equal(detectCanonicalFileType('image/webp', 'graphic.bin'), 'image');
+        });
+
+        it('identifies video MIME types and extensions', () => {
+            assert.equal(detectCanonicalFileType('video/mp4', 'clip.mp4'), 'video');
+            assert.equal(detectCanonicalFileType('', 'recording.webm'), 'video');
+            assert.equal(detectCanonicalFileType('video/quicktime', 'vid.mov'), 'video');
+        });
+
+        it('identifies document MIME types and extensions', () => {
+            assert.equal(detectCanonicalFileType('application/pdf', 'doc.pdf'), 'document');
+            assert.equal(detectCanonicalFileType('text/plain', 'notes.txt'), 'document');
+            assert.equal(detectCanonicalFileType('application/zip', 'archive.zip'), 'document');
+        });
+    });
+
     describe('Retention period calculation', () => {
         it('returns default 240 hours when FILE_RETENTION_HOURS is unset', () => {
             const original = process.env.FILE_RETENTION_HOURS;

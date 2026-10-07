@@ -16,6 +16,59 @@ import {
 } from "../services/fileStorageService.js";
 
 /**
+ * Sanitize filename to prevent directory traversal and illegal characters
+ */
+export const sanitizeFileName = (fileName) => {
+  if (!fileName || typeof fileName !== "string") return "attachment";
+  // Remove directory traversal sequences
+  let clean = fileName.replace(/(\.\.[\/\\]|\.\.)/g, "");
+  // Replace slashes and path separators
+  clean = clean.replace(/[/\\]/g, "_");
+  // Replace illegal Windows & Unix filename characters: < > : " / \ | ? *
+  clean = clean.replace(/[<>:"|?*]/g, "_");
+  // Remove null bytes and ASCII control characters
+  clean = clean.replace(/[\x00-\x1f\x7f-\x9f]/g, "");
+  // Strip leading dots to avoid hidden files and trim whitespace
+  clean = clean.trim().replace(/^\.+/, "");
+  // Remove trailing dots or spaces which cause issues in Windows filesystems
+  clean = clean.replace(/[. ]+$/, "");
+  if (!clean) clean = "attachment";
+  // Ensure maximum length of 200 chars while preserving extension
+  if (clean.length > 200) {
+    const extIndex = clean.lastIndexOf(".");
+    if (extIndex > -1) {
+      const ext = clean.slice(extIndex);
+      clean = clean.slice(0, 195 - ext.length) + ext;
+    } else {
+      clean = clean.slice(0, 200);
+    }
+  }
+  return clean;
+};
+
+/**
+ * Detect canonical file type (image, video, document) from MIME and extension
+ */
+export const detectCanonicalFileType = (mimeType = "", fileName = "", explicitType = "") => {
+  if (explicitType && ["image", "video", "document"].includes(explicitType)) {
+    return explicitType;
+  }
+  const mime = (mimeType || "").toLowerCase();
+  const ext = (fileName || "").split(".").pop().toLowerCase();
+
+  const imageExts = new Set(["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp", "ico", "heic", "tiff"]);
+  const videoExts = new Set(["mp4", "webm", "mov", "avi", "mkv", "wmv", "flv", "m4v", "3gp"]);
+
+  if (mime.startsWith("image/") || imageExts.has(ext)) {
+    return "image";
+  }
+  if (mime.startsWith("video/") || videoExts.has(ext)) {
+    return "video";
+  }
+  return "document";
+};
+
+/**
  * Upload a file to temporary encrypted server storage
  * Creates Message, separate Model (Image/Video/Document), and PendingFileDelivery queue record
  */
@@ -59,7 +112,7 @@ export const uploadFile = async (req, res) => {
     }
 
     const isParticipant = conversation.participants.some(
-      (p) => p.toString() === req.user._id.toString()
+      (p) => (p?._id || p)?.toString() === req.user._id.toString()
     );
     if (!isParticipant) {
       return res.status(403).json({
@@ -70,33 +123,31 @@ export const uploadFile = async (req, res) => {
 
     // Determine receiver for 1-on-1 chat
     let receiverId = customReceiverId;
+    if (receiverId && typeof receiverId === "object" && receiverId._id) {
+      receiverId = receiverId._id.toString();
+    }
     if (!receiverId && !conversation.isGroup) {
       const otherParticipant = conversation.participants.find(
-        (p) => p.toString() !== req.user._id.toString()
+        (p) => (p?._id || p)?.toString() !== req.user._id.toString()
       );
       if (otherParticipant) {
-        receiverId = otherParticipant.toString();
+        receiverId = (otherParticipant._id || otherParticipant).toString();
       }
     }
 
-    if (!receiverId) {
+    if (!receiverId && !conversation.isGroup) {
       return res.status(400).json({
         success: false,
         message: "Receiver could not be determined",
       });
     }
 
-    // Determine canonical fileType
+    // Determine canonical fileType & sanitize filename
     const mime = req.file.mimetype || "";
-    let fileType = rawFileType;
-    if (!fileType) {
-      if (mime.startsWith("image/")) fileType = "image";
-      else if (mime.startsWith("video/")) fileType = "video";
-      else fileType = "document";
-    }
+    const originalName = sanitizeFileName(req.file.originalname);
+    const fileType = detectCanonicalFileType(mime, originalName, rawFileType);
 
     const fileId = customFileId || `file_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-    const originalName = req.file.originalname || "attachment";
     const fileSize = req.file.size;
 
     // Stream uploaded temporary file to encrypted disk storage
@@ -236,22 +287,41 @@ export const uploadFile = async (req, res) => {
       // Send to sender
       io.to(`user:${req.user._id.toString()}`).emit("newMessage", senderPayload);
 
-      // Send to receiver
-      io.to(`user:${receiverId.toString()}`).emit("newMessage", msgObj);
-
-      // Notify receiver of available pending file
-      io.to(`user:${receiverId.toString()}`).emit("file:available", {
-        fileId,
-        messageId: message._id,
-        conversationId,
-        sender: req.user._id,
-        fileType,
-        fileName: originalName,
-        fileSize,
-        mimeType: mime,
-        status: "pending_delivery",
-        expiresAt,
-      });
+      // Send to receiver in 1-on-1 or broadcast to group participants
+      if (receiverId) {
+        io.to(`user:${receiverId.toString()}`).emit("newMessage", msgObj);
+        io.to(`user:${receiverId.toString()}`).emit("file:available", {
+          fileId,
+          messageId: message._id,
+          conversationId,
+          sender: req.user._id,
+          fileType,
+          fileName: originalName,
+          fileSize,
+          mimeType: mime,
+          status: "pending_delivery",
+          expiresAt,
+        });
+      } else if (conversation.isGroup && Array.isArray(conversation.participants)) {
+        conversation.participants.forEach((p) => {
+          const pId = (p?._id || p)?.toString();
+          if (pId && pId !== req.user._id.toString()) {
+            io.to(`user:${pId}`).emit("newMessage", msgObj);
+            io.to(`user:${pId}`).emit("file:available", {
+              fileId,
+              messageId: message._id,
+              conversationId,
+              sender: req.user._id,
+              fileType,
+              fileName: originalName,
+              fileSize,
+              mimeType: mime,
+              status: "pending_delivery",
+              expiresAt,
+            });
+          }
+        });
+      }
     }
 
     return res.status(201).json({
@@ -377,7 +447,7 @@ export const downloadFile = async (req, res) => {
     res.setHeader("Content-Length", delivery.fileSize);
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename="${encodeURIComponent(delivery.fileName)}"`
+      `attachment; filename="${encodeURIComponent(sanitizeFileName(delivery.fileName))}"`
     );
 
     // Stream decrypted file directly to response

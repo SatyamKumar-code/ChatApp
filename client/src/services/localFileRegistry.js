@@ -1,21 +1,41 @@
 /**
  * Local File Registry Service
- * Persistent offline storage using IndexedDB
- * Manages sender's original files and receiver's downloaded files
- * Ensures local storage remains the final permanent storage
+ * Persistent offline storage using IndexedDB & File System Access API
+ * Manages sender's local copies in ChatApp/Send/ and receiver's local copies in ChatApp/Received/
+ * Categorized into:
+ * - ChatApp_image
+ * - ChatApp_video
+ * - ChatApp_document
  */
 
-const DB_NAME = "ChatApp_LocalRegistry_v2";
-const DB_VERSION = 1;
+import {
+  getLogicalPath,
+  getFileCategory,
+  getCategorySubfolder,
+  sanitizeFileName,
+  saveFileToDiskWithApi,
+  triggerBrowserDownload,
+  isFileSystemAccessSupported,
+} from "./fileSystemStorage.js";
+
+const DB_NAME = "ChatApp_LocalFiles_v1";
 const STORE_NAME = "files";
 
+let cachedDb = null;
 let dbPromise = null;
 const urlCache = new Map();
 
-const getDB = () => {
-  if (!dbPromise) {
-    dbPromise = new Promise((resolve, reject) => {
-      const request = indexedDB.open(DB_NAME, DB_VERSION);
+export const getDB = () => {
+  if (cachedDb) return Promise.resolve(cachedDb);
+  if (dbPromise) return dbPromise;
+
+  dbPromise = new Promise((resolve) => {
+    try {
+      if (typeof indexedDB === "undefined") {
+        dbPromise = null;
+        return resolve(null);
+      }
+      const request = indexedDB.open(DB_NAME, 1);
 
       request.onupgradeneeded = (e) => {
         const db = e.target.result;
@@ -24,69 +44,126 @@ const getDB = () => {
           store.createIndex("messageId", "messageId", { unique: false });
           store.createIndex("fileType", "fileType", { unique: false });
           store.createIndex("isSenderOriginal", "isSenderOriginal", { unique: false });
+          store.createIndex("direction", "direction", { unique: false });
         }
       };
 
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
-  }
+      request.onsuccess = () => {
+        cachedDb = request.result;
+        cachedDb.onversionchange = () => {
+          try { cachedDb.close(); } catch {}
+          cachedDb = null;
+          dbPromise = null;
+        };
+        cachedDb.onclose = () => {
+          cachedDb = null;
+          dbPromise = null;
+        };
+        resolve(cachedDb);
+      };
+      request.onerror = (e) => {
+        console.warn("[LocalRegistry] getDB error:", e?.target?.error);
+        dbPromise = null;
+        resolve(null);
+      };
+      request.onblocked = () => {
+        console.warn("[LocalRegistry] getDB upgrade blocked");
+        dbPromise = null;
+        resolve(null);
+      };
+    } catch (err) {
+      console.warn("[LocalRegistry] getDB exception:", err);
+      dbPromise = null;
+      resolve(null);
+    }
+  });
+
   return dbPromise;
 };
 
 /**
- * Get virtual local storage path for PC
+ * Get virtual/logical local storage path for PC:
+ * ChatApp/<Send|Received>/ChatApp_<image|video|document>/<fileName>
  */
-export const getLocalPCPath = (fileName, fileType) => {
-  let subDir = "ChatApp_Document";
-  if (fileType === "image") subDir = "ChatApp_Image";
-  else if (fileType === "video") subDir = "ChatApp_Video";
-  return `Downloads/ChatApp/${subDir}/${fileName}`;
+export const getLocalPCPath = (fileName, fileType, direction = "Received") => {
+  return getLogicalPath({ fileName, fileType, direction });
 };
 
 /**
- * Save a file (Blob or File) to the local IndexedDB registry
+ * Save a file (Blob or File) to the local IndexedDB registry & native disk if permitted
  */
 export const saveLocalFile = async ({
   fileId,
   messageId = "",
   blob,
   fileName,
-  fileType = "document",
+  fileType = "",
   mimeType = "",
   fileSize = 0,
   isSenderOriginal = false,
+  direction = null,
 }) => {
   if (!fileId || !blob) return null;
 
   try {
-    const db = await getDB();
-    const localPath = getLocalPCPath(fileName, fileType);
+    const effectiveDirection = direction || (isSenderOriginal ? "Send" : "Received");
+    const safeName = sanitizeFileName(fileName);
+    const category = getFileCategory(fileType, mimeType || blob.type, safeName);
+    const localPath = getLocalPCPath(safeName, category, effectiveDirection);
+
+    // 1. Attempt writing to physical disk via File System Access API if permission is granted
+    let diskResult = null;
+    try {
+      diskResult = await saveFileToDiskWithApi({
+        blob,
+        fileName: safeName,
+        fileType: category,
+        mimeType: mimeType || blob.type,
+        direction: effectiveDirection,
+      });
+    } catch (diskErr) {
+      console.warn("[LocalFileRegistry] Direct disk save skipped or failed:", diskErr);
+    }
+
+    const finalPath = diskResult?.localPath || localPath;
+    const finalFileName = diskResult?.fileName || safeName;
 
     const record = {
       fileId,
       messageId: messageId ? messageId.toString() : "",
       blob,
-      fileName,
-      fileType,
+      fileName: finalFileName,
+      fileType: category,
       mimeType: mimeType || blob.type || "application/octet-stream",
       fileSize: fileSize || blob.size || 0,
-      localPath,
+      localPath: finalPath,
+      direction: effectiveDirection,
       isSenderOriginal: Boolean(isSenderOriginal),
+      savedToDisk: Boolean(diskResult?.savedToDisk),
       savedAt: Date.now(),
     };
 
-    await new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, "readwrite");
-      const store = tx.objectStore(STORE_NAME);
-      const req = store.put(record);
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => reject(req.error);
-    });
+    const db = await Promise.race([
+      getDB(),
+      new Promise((r) => setTimeout(() => r(null), 500)),
+    ]);
+    if (db && db.objectStoreNames.contains(STORE_NAME)) {
+      await new Promise((resolve) => {
+        try {
+          const tx = db.transaction(STORE_NAME, "readwrite");
+          const store = tx.objectStore(STORE_NAME);
+          const req = store.put(record);
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => resolve(null);
+        } catch {
+          resolve(null);
+        }
+      });
+    }
 
     // Update URL cache
     if (urlCache.has(fileId)) {
-      URL.revokeObjectURL(urlCache.get(fileId));
+      try { URL.revokeObjectURL(urlCache.get(fileId)); } catch {}
     }
     const objectUrl = URL.createObjectURL(blob);
     urlCache.set(fileId, objectUrl);
@@ -105,12 +182,17 @@ export const hasLocalFile = async (fileId) => {
   if (!fileId) return false;
   try {
     const db = await getDB();
+    if (!db || !db.objectStoreNames.contains(STORE_NAME)) return false;
     return new Promise((resolve) => {
-      const tx = db.transaction(STORE_NAME, "readonly");
-      const store = tx.objectStore(STORE_NAME);
-      const req = store.get(fileId);
-      req.onsuccess = () => resolve(Boolean(req.result && req.result.blob));
-      req.onerror = () => resolve(false);
+      try {
+        const tx = db.transaction(STORE_NAME, "readonly");
+        const store = tx.objectStore(STORE_NAME);
+        const req = store.get(fileId);
+        req.onsuccess = () => resolve(Boolean(req.result && req.result.blob));
+        req.onerror = () => resolve(false);
+      } catch {
+        resolve(false);
+      }
     });
   } catch {
     return false;
@@ -127,12 +209,19 @@ export const getLocalFile = async (fileId) => {
   if (urlCache.has(fileId)) {
     try {
       const db = await getDB();
+      if (!db || !db.objectStoreNames.contains(STORE_NAME)) {
+        return { fileId, objectUrl: urlCache.get(fileId) };
+      }
       const record = await new Promise((resolve) => {
-        const tx = db.transaction(STORE_NAME, "readonly");
-        const store = tx.objectStore(STORE_NAME);
-        const req = store.get(fileId);
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => resolve(null);
+        try {
+          const tx = db.transaction(STORE_NAME, "readonly");
+          const store = tx.objectStore(STORE_NAME);
+          const req = store.get(fileId);
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => resolve(null);
+        } catch {
+          resolve(null);
+        }
       });
       if (record && record.blob) {
         return {
@@ -147,24 +236,30 @@ export const getLocalFile = async (fileId) => {
 
   try {
     const db = await getDB();
+    if (!db || !db.objectStoreNames.contains(STORE_NAME)) return null;
+
     return new Promise((resolve) => {
-      const tx = db.transaction(STORE_NAME, "readonly");
-      const store = tx.objectStore(STORE_NAME);
-      const req = store.get(fileId);
-      req.onsuccess = () => {
-        const result = req.result;
-        if (result && result.blob) {
-          const objectUrl = URL.createObjectURL(result.blob);
-          urlCache.set(fileId, objectUrl);
-          resolve({
-            ...result,
-            objectUrl,
-          });
-        } else {
-          resolve(null);
-        }
-      };
-      req.onerror = () => resolve(null);
+      try {
+        const tx = db.transaction(STORE_NAME, "readonly");
+        const store = tx.objectStore(STORE_NAME);
+        const req = store.get(fileId);
+        req.onsuccess = () => {
+          const result = req.result;
+          if (result && result.blob) {
+            const objectUrl = URL.createObjectURL(result.blob);
+            urlCache.set(fileId, objectUrl);
+            resolve({
+              ...result,
+              objectUrl,
+            });
+          } else {
+            resolve(null);
+          }
+        };
+        req.onerror = () => resolve(null);
+      } catch {
+        resolve(null);
+      }
     });
   } catch (err) {
     console.error("[LocalFileRegistry] Error retrieving file:", err);
@@ -174,16 +269,22 @@ export const getLocalFile = async (fileId) => {
 
 /**
  * Save sender's original file for recovery redownload requests
+ * Stored locally into ChatApp/Send/ChatApp_<type>/
  */
 export const saveSenderOriginal = async (fileId, file, meta = {}) => {
+  const mime = file.type || meta.mimeType || "";
+  const name = file.name || meta.fileName || "original_file";
+  const category = getFileCategory(meta.fileType, mime, name);
+
   return saveLocalFile({
     fileId,
     blob: file,
-    fileName: file.name || meta.fileName || "original_file",
-    fileType: meta.fileType || (file.type?.startsWith("image/") ? "image" : file.type?.startsWith("video/") ? "video" : "document"),
-    mimeType: file.type || meta.mimeType || "application/octet-stream",
+    fileName: name,
+    fileType: category,
+    mimeType: mime || "application/octet-stream",
     fileSize: file.size || meta.fileSize || 0,
     isSenderOriginal: true,
+    direction: "Send",
   });
 };
 
@@ -196,21 +297,65 @@ export const getSenderOriginal = async (fileId) => {
 };
 
 /**
- * Trigger standard browser download to PC disk (Downloads/ChatApp/...)
+ * Trigger standard browser download to device disk
  */
-export const triggerDeviceDownload = (blob, fileName, fileType) => {
+export const triggerDeviceDownload = (blob, fileName, fileType, direction = "Received") => {
+  return triggerBrowserDownload(blob, fileName);
+};
+
+/**
+ * Get all files stored in the local registry
+ */
+export const getAllLocalFiles = async () => {
   try {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = fileName;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 60000);
-    return true;
-  } catch (err) {
-    console.error("[LocalFileRegistry] Error triggering device download:", err);
-    return false;
+    const db = await getDB();
+    if (!db || !db.objectStoreNames.contains(STORE_NAME)) return [];
+    return new Promise((resolve) => {
+      try {
+        const tx = db.transaction(STORE_NAME, "readonly");
+        const store = tx.objectStore(STORE_NAME);
+        const req = store.getAll();
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = () => resolve([]);
+      } catch {
+        resolve([]);
+      }
+    });
+  } catch {
+    return [];
+  }
+};
+
+/**
+ * Get summary storage statistics for the Settings modal
+ */
+export const getLocalFileStats = async () => {
+  try {
+    const files = await getAllLocalFiles();
+    let totalBytes = 0;
+    const stats = {
+      totalFiles: files.length,
+      totalBytes: 0,
+      send: { image: 0, video: 0, document: 0, count: 0 },
+      received: { image: 0, video: 0, document: 0, count: 0 },
+    };
+
+    for (const f of files) {
+      const size = f.fileSize || f.blob?.size || 0;
+      totalBytes += size;
+      const dirKey = f.direction === "Send" || f.isSenderOriginal ? "send" : "received";
+      const catKey = f.fileType === "image" ? "image" : f.fileType === "video" ? "video" : "document";
+      stats[dirKey].count++;
+      stats[dirKey][catKey]++;
+    }
+    stats.totalBytes = totalBytes;
+    return stats;
+  } catch {
+    return {
+      totalFiles: 0,
+      totalBytes: 0,
+      send: { image: 0, video: 0, document: 0, count: 0 },
+      received: { image: 0, video: 0, document: 0, count: 0 },
+    };
   }
 };

@@ -5,7 +5,7 @@ import { CallContext } from "../../context/CallContext";
 import { ChatContext } from "../../context/ChatContext";
 import { decryptMessage } from "../../utils/e2ee";
 import CircularTransferProgress from "./CircularTransferProgress";
-import { getLocalFile, triggerDeviceDownload } from "../../services/localFileRegistry";
+import { getLocalFile } from "../../services/localFileRegistry";
 
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
 const EXTRA_REACTIONS = [
@@ -1012,7 +1012,7 @@ export const MessageBubble = ({
                                     </p>
                                     <p className="text-[10px] text-zinc-400 mt-0.5 font-mono">
                                         {formatBytes(fileSize) || "Document"}
-                                        {localFileUrl ? " • Saved locally" : ""}
+                                        {localFileUrl ? ` • Saved in ChatApp/${isMe ? "Send" : "Received"}` : ""}
                                     </p>
                                 </div>
 
