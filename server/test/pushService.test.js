@@ -43,24 +43,56 @@ describe("pushService & pushController – Web Push Functionality", () => {
 
     describe("pushController validations", () => {
         it("getVapidPublicKey returns public key when configured", async () => {
-            let jsonOutput = null;
-            let statusCode = null;
+            const originalKey = process.env.VAPID_PUBLIC_KEY;
+            process.env.VAPID_PUBLIC_KEY = "test_vapid_public_key_mock_12345";
+            try {
+                let jsonOutput = null;
+                let statusCode = null;
 
-            const res = {
-                status: (code) => {
-                    statusCode = code;
-                    return {
-                        json: (data) => {
-                            jsonOutput = data;
-                        },
-                    };
-                },
-            };
+                const res = {
+                    status: (code) => {
+                        statusCode = code;
+                        return {
+                            json: (data) => {
+                                jsonOutput = data;
+                            },
+                        };
+                    },
+                };
 
-            await getVapidPublicKey({}, res);
-            assert.equal(statusCode, 200);
-            assert.equal(jsonOutput.success, true);
-            assert.ok(jsonOutput.publicKey);
+                await getVapidPublicKey({}, res);
+                assert.equal(statusCode, 200);
+                assert.equal(jsonOutput.success, true);
+                assert.equal(jsonOutput.publicKey, "test_vapid_public_key_mock_12345");
+            } finally {
+                process.env.VAPID_PUBLIC_KEY = originalKey;
+            }
+        });
+
+        it("getVapidPublicKey returns 500 when not configured", async () => {
+            const originalKey = process.env.VAPID_PUBLIC_KEY;
+            delete process.env.VAPID_PUBLIC_KEY;
+            try {
+                let jsonOutput = null;
+                let statusCode = null;
+
+                const res = {
+                    status: (code) => {
+                        statusCode = code;
+                        return {
+                            json: (data) => {
+                                jsonOutput = data;
+                            },
+                        };
+                    },
+                };
+
+                await getVapidPublicKey({}, res);
+                assert.equal(statusCode, 500);
+                assert.equal(jsonOutput.success, false);
+            } finally {
+                process.env.VAPID_PUBLIC_KEY = originalKey;
+            }
         });
 
         it("subscribeUser returns 400 when endpoint or keys are missing", async () => {
