@@ -107,6 +107,7 @@ const AuthProvider = ({ children }) => {
             try {
                 localStorage.removeItem("chatapp_cached_user");
                 localStorage.removeItem("chatapp_cached_conversations");
+                sessionStorage.removeItem("chatapp_push_prompt_dismissed");
             } catch (e) {}
         }
     };

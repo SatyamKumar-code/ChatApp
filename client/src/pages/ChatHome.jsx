@@ -406,6 +406,14 @@ export const ChatHome = () => {
                     <CallHistoryList
                         onOpenSettings={() => setIsSettingsOpen(true)}
                     />
+                ) : activeTab === "contacts" ? (
+                    <ContactList
+                        onStartChat={() => {
+                            setActiveTab("chats");
+                            setIsProfilePanelOpen(false);
+                        }}
+                        onOpenSettings={() => setIsSettingsOpen(true)}
+                    />
                 ) : (
                     <ChatList
                         onSelectChat={() => setIsProfilePanelOpen(false)}
@@ -735,6 +743,33 @@ export const ChatHome = () => {
                             />
                         </svg>
                         <span className="text-[11px]">Groups</span>
+                    </button>
+
+                    {/* Contacts Tab */}
+                    <button
+                        type="button"
+                        onClick={() => setActiveTab("contacts")}
+                        className={`flex flex-col items-center gap-1 py-1 px-3 rounded-xl transition-all cursor-pointer ${
+                            activeTab === "contacts"
+                                ? "text-purple-400 font-semibold"
+                                : "text-zinc-400 hover:text-white"
+                        }`}
+                    >
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            className="w-5 h-5"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                        >
+                            <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"
+                            />
+                        </svg>
+                        <span className="text-[11px]">Contacts</span>
                     </button>
 
                     {/* Status Tab */}

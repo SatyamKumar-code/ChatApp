@@ -184,22 +184,8 @@ export const syncPushSubscriptionIfGranted = async () => {
     if (!isPushSupported()) return;
     if (Notification.permission === "granted" && localStorage.getItem("chatapp_push_enabled") !== "false") {
         try {
-            const registration = await navigator.serviceWorker.ready;
-            const sub = await registration.pushManager.getSubscription();
-            if (sub) {
-                const subJson = sub.toJSON();
-                await api.post("/push/subscribe", {
-                    endpoint: sub.endpoint,
-                    keys: {
-                        p256dh: subJson.keys?.p256dh,
-                        auth: subJson.keys?.auth,
-                    },
-                    userAgent: navigator.userAgent,
-                    deviceInfo: `${navigator.platform || ""} • AutoSync`,
-                });
-            }
+            await subscribeToPush();
         } catch (err) {
-            // Silent error on auto-sync
             console.debug("[PushService] Background sync error:", err);
         }
     }

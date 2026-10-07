@@ -2,6 +2,7 @@ import { useState } from "react";
 import { AuthContext } from "../context/AuthContext";
 import { Link, useNavigate } from "react-router-dom";
 import { useContext } from "react";
+import { subscribeToPush } from "../services/pushNotificationService";
 
 const Login = () => {
     const { login } = useContext(AuthContext);
@@ -32,6 +33,27 @@ const Login = () => {
             const data = await login(formData);
 
             if (data.success) {
+                // Clear any session-level dismissal flag on new login
+                try {
+                    sessionStorage.removeItem("chatapp_push_prompt_dismissed");
+                } catch (e) {}
+
+                // Immediately trigger native notification permission request using the login click gesture
+                if (typeof window !== "undefined" && "Notification" in window) {
+                    if (Notification.permission === "default") {
+                        try {
+                            const perm = await Notification.requestPermission();
+                            if (perm === "granted") {
+                                subscribeToPush().catch(() => {});
+                            }
+                        } catch (err) {
+                            console.debug("Login notification prompt error:", err);
+                        }
+                    } else if (Notification.permission === "granted") {
+                        subscribeToPush().catch(() => {});
+                    }
+                }
+
                 navigate("/");
             } else {
                 setError(data.message);

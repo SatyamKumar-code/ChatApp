@@ -9,11 +9,16 @@ export const ContactList = ({ onStartChat, onOpenSettings }) => {
     const {
         contacts,
         contactsLoading,
+        getContacts,
         conversations,
         openConversation,
         selectConversation,
         searchUsers,
     } = useContext(ChatContext);
+
+    useEffect(() => {
+        getContacts?.();
+    }, [getContacts]);
 
     const [searchQuery, setSearchQuery] = useState("");
     const searchInputRef = useRef(null);
@@ -284,17 +289,36 @@ export const ContactList = ({ onStartChat, onOpenSettings }) => {
                                             isOnline={partner.isOnline}
                                         />
                                         <div className="flex-1 min-w-0">
-                                            <div className="flex items-center justify-between">
+                                            <div className="flex items-center justify-between gap-2">
                                                 <h3 className="text-sm font-semibold text-white truncate">
                                                     {partner.name}
                                                 </h3>
-                                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-300 border border-purple-500/20 font-medium">
+                                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-300 border border-purple-500/20 font-medium shrink-0">
                                                     Chat
                                                 </span>
                                             </div>
-                                            <p className="text-xs text-zinc-400 font-mono mt-0.5">
-                                                {partner.phone}
-                                            </p>
+                                            <div className="flex items-center justify-between gap-2 mt-0.5">
+                                                <p className="text-xs text-zinc-400 font-mono truncate">
+                                                    {partner.phone}
+                                                </p>
+                                                {(() => {
+                                                    const contactMatch = contacts.find(
+                                                        (c) => (c.user?._id || c.contactUser?._id)?.toString() === partner._id?.toString()
+                                                    );
+                                                    const unread = conv.unreadCount !== undefined
+                                                        ? conv.unreadCount
+                                                        : (contactMatch?.unreadCount || 0);
+                                                    if (unread <= 0) return null;
+                                                    return (
+                                                        <span
+                                                            title={`${unread} unread messages`}
+                                                            className="min-w-[19px] h-[19px] px-1 rounded-full bg-purple-600 text-white text-[11px] font-bold flex items-center justify-center shrink-0 shadow-sm shadow-purple-600/50 ring-1 ring-white/10"
+                                                        >
+                                                            {unread > 99 ? "99+" : unread}
+                                                        </span>
+                                                    );
+                                                })()}
+                                            </div>
                                         </div>
                                     </div>
                                 );
@@ -458,12 +482,12 @@ export const ContactList = ({ onStartChat, onOpenSettings }) => {
                                             isOnline={contact.user?.isOnline}
                                         />
                                         <div className="flex-1 min-w-0">
-                                            <div className="flex items-center justify-between">
+                                            <div className="flex items-center justify-between gap-2">
                                                 <h3 className="text-sm font-medium text-zinc-200 truncate">
                                                     {contact.name}
                                                 </h3>
                                                 <span
-                                                    className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+                                                    className={`text-[10px] px-2 py-0.5 rounded-full font-medium shrink-0 ${
                                                         contact.registered
                                                             ? "bg-purple-500/10 text-purple-300 border border-purple-500/20"
                                                             : "bg-amber-500/10 text-amber-400 border border-amber-500/20"
@@ -472,9 +496,38 @@ export const ContactList = ({ onStartChat, onOpenSettings }) => {
                                                     {contact.registered ? "Chat" : "Invite"}
                                                 </span>
                                             </div>
-                                            <p className="text-xs text-zinc-400 font-mono mt-0.5">
-                                                {contact.phone}
-                                            </p>
+                                            <div className="flex items-center justify-between gap-2 mt-0.5">
+                                                <p className="text-xs text-zinc-400 font-mono truncate">
+                                                    {contact.phone}
+                                                </p>
+                                                {(() => {
+                                                    const contactUserId = (contact.user?._id || contact.contactUser?._id || contact.user)?.toString();
+                                                    const cleanContactPhone = contact.phone?.replace(/\D/g, "");
+                                                    const matchingConv = conversations.find((c) => {
+                                                        if (c.isGroup) return false;
+                                                        const pId = (c.user?._id || c.user)?.toString();
+                                                        if (contactUserId && pId && contactUserId === pId) return true;
+                                                        const pPhone = c.user?.phone?.replace(/\D/g, "");
+                                                        return Boolean(
+                                                            cleanContactPhone &&
+                                                            pPhone &&
+                                                            (cleanContactPhone === pPhone || (cleanContactPhone.length >= 7 && pPhone.includes(cleanContactPhone.slice(-10))))
+                                                        );
+                                                    });
+                                                    const unread = matchingConv?.unreadCount !== undefined
+                                                        ? matchingConv.unreadCount
+                                                        : (contact.unreadCount || 0);
+                                                    if (unread <= 0) return null;
+                                                    return (
+                                                        <span
+                                                            title={`${unread} unread messages from ${contact.name}`}
+                                                            className="min-w-[19px] h-[19px] px-1 rounded-full bg-purple-600 text-white text-[11px] font-bold flex items-center justify-center shrink-0 shadow-sm shadow-purple-600/50 ring-1 ring-white/10"
+                                                        >
+                                                            {unread > 99 ? "99+" : unread}
+                                                        </span>
+                                                    );
+                                                })()}
+                                            </div>
                                         </div>
                                     </div>
                                 ))

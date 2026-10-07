@@ -427,6 +427,10 @@ const ChatProvider = ({ children }) => {
             }
 
             // Immediately update sidebar conversation preview with confirmed message
+            const myCurrentId = (user?._id || user?.id)?.toString();
+            const senderIdStr = (decryptedMessage?.sender?._id || decryptedMessage?.sender || message?.sender?._id || message?.sender)?.toString();
+            const isFromOtherSender = Boolean(senderIdStr && myCurrentId && senderIdStr !== myCurrentId);
+
             if (convId) {
                 setConversations((prev) =>
                     prev.map((c) => {
@@ -436,11 +440,39 @@ const ChatProvider = ({ children }) => {
                                 ...c,
                                 lastMessage: decryptedMessage,
                                 lastMessageAt: decryptedMessage.createdAt,
+                                unreadCount: isFromOtherSender && !isForActiveConversation
+                                    ? (c.unreadCount || 0) + 1
+                                    : (isForActiveConversation ? 0 : (c.unreadCount || 0)),
                             };
                         }
                         return c;
                     })
                 );
+
+                if (isFromOtherSender) {
+                    const senderPhone = (decryptedMessage?.sender?.phone || message?.sender?.phone || "")?.replace(/\D/g, "");
+                    setContacts((prev) =>
+                        (prev || []).map((contact) => {
+                            const cUserId = (contact.user?._id || contact.contactUser?._id || contact.user)?.toString();
+                            const cPhone = (contact.phone || contact.user?.phone || "")?.replace(/\D/g, "");
+                            const matchesId = Boolean(cUserId && senderIdStr && cUserId === senderIdStr);
+                            const matchesPhone = Boolean(
+                                senderPhone &&
+                                cPhone &&
+                                (senderPhone === cPhone || (senderPhone.length >= 7 && cPhone.includes(senderPhone.slice(-10))))
+                            );
+                            if (matchesId || matchesPhone) {
+                                return {
+                                    ...contact,
+                                    unreadCount: !isForActiveConversation
+                                        ? (contact.unreadCount || 0) + 1
+                                        : 0,
+                                };
+                            }
+                            return contact;
+                        })
+                    );
+                }
             }
 
             // Clean up outbox queue if matching item is confirmed
@@ -478,8 +510,9 @@ const ChatProvider = ({ children }) => {
                 });
             }
 
-            // Refresh chat list
+            // Refresh both conversation and contact list from backend
             getConversations();
+            getContacts();
 
             // Play sound chime if message was sent by someone else
             if (msgSenderId && msgSenderId !== myId) {
@@ -2158,6 +2191,25 @@ const ChatProvider = ({ children }) => {
             }
             setSelectedConversation(convToSet);
 
+            // Clear unread count for this conversation in UI
+            const convIdStr = (conversation._id?.toString() || conversation._id);
+            setConversations((prev) =>
+                prev.map((c) =>
+                    (c._id?.toString() || c._id) === convIdStr
+                        ? { ...c, unreadCount: 0 }
+                        : c
+                )
+            );
+            const partnerId = (conversation.user?._id || conversation.user)?.toString();
+            if (partnerId) {
+                setContacts((prev) =>
+                    prev.map((cnt) => {
+                        const cntId = (cnt.user?._id || cnt.contactUser?._id || cnt.user)?.toString();
+                        return cntId === partnerId ? { ...cnt, unreadCount: 0 } : cnt;
+                    })
+                );
+            }
+
             // Immediately load cached messages for this conversation
             const cached = loadCachedMessages(conversation._id);
             if (cached && cached.length > 0) {
@@ -2380,8 +2432,10 @@ const ChatProvider = ({ children }) => {
     useEffect(() => {
         if (user) {
             getConversations();
+            getContacts();
         } else {
             setConversations([]);
+            setContacts([]);
             setLoading(false);
         }
     }, [user]);

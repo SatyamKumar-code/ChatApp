@@ -1,4 +1,4 @@
-const CACHE_NAME = "chatapp-shell-v9";
+const CACHE_NAME = "chatapp-shell-v10";
 const STATIC_ASSETS = [
     "/",
     "/index.html",
@@ -21,6 +21,55 @@ const getBackendApiUrl = (endpoint, payloadServerUrl) => {
     }
     return endpoint;
 };
+
+// Decrypt E2EE message body in Service Worker if it arrives encrypted
+async function decryptEncryptedBody(encryptedText, conversationId) {
+    if (!encryptedText || !encryptedText.startsWith("enc:v1:") || !conversationId) {
+        return encryptedText;
+    }
+    if (!self.crypto || !self.crypto.subtle) {
+        return "New message";
+    }
+    try {
+        const encoder = new TextEncoder();
+        const rawSecret = `chatapp_e2ee_${conversationId}_secure_seed_2026`;
+        const keyMaterial = await self.crypto.subtle.importKey(
+            "raw",
+            encoder.encode(rawSecret),
+            { name: "PBKDF2" },
+            false,
+            ["deriveKey"]
+        );
+        const cryptoKey = await self.crypto.subtle.deriveKey(
+            {
+                name: "PBKDF2",
+                salt: encoder.encode(`salt_${conversationId}_chatapp`),
+                iterations: 100000,
+                hash: "SHA-256",
+            },
+            keyMaterial,
+            { name: "AES-GCM", length: 256 },
+            false,
+            ["decrypt"]
+        );
+
+        const parts = encryptedText.split(":");
+        if (parts.length !== 4) return "New message";
+
+        const iv = Uint8Array.from(atob(parts[2]), (c) => c.charCodeAt(0));
+        const cipherBuffer = Uint8Array.from(atob(parts[3]), (c) => c.charCodeAt(0));
+
+        const decryptedBuffer = await self.crypto.subtle.decrypt(
+            { name: "AES-GCM", iv },
+            cryptoKey,
+            cipherBuffer
+        );
+        return new TextDecoder().decode(decryptedBuffer);
+    } catch (err) {
+        console.warn("[SW] Failed to decrypt notification body:", err);
+        return "New message";
+    }
+}
 
 // Install: Cache core application shell
 self.addEventListener("install", (event) => {
@@ -207,15 +256,20 @@ self.addEventListener("push", (event) => {
                 }
 
                 const title = payload.isGroup
-                    ? `${payload.conversationName || "Group"} • ${payload.senderName || "ChatApp"}`
-                    : payload.senderName || "ChatApp";
+                    ? `${payload.conversationName || "Group"} • ${payload.senderName || "Someone"}`
+                    : payload.senderName || "New Message";
 
                 const safeIcon = (payload.senderAvatar && (payload.senderAvatar.startsWith("http://") || payload.senderAvatar.startsWith("https://")))
                     ? payload.senderAvatar
                     : defaultIcon;
 
+                let bodyText = payload.body || "New message received";
+                if (bodyText.startsWith("enc:v1:")) {
+                    bodyText = await decryptEncryptedBody(bodyText, payload.conversationId);
+                }
+
                 const messageNotificationOptions = {
-                    body: payload.body || "New message received",
+                    body: bodyText,
                     icon: safeIcon,
                     badge: defaultBadge,
                     tag: `msg-${payload.conversationId || "general"}`,
@@ -245,7 +299,7 @@ self.addEventListener("push", (event) => {
                 } catch (notifErr) {
                     console.warn("[SW] Advanced message notification failed, showing basic fallback:", notifErr);
                     notifPromise = self.registration.showNotification(title, {
-                        body: payload.body || "New message received",
+                        body: bodyText,
                         icon: defaultIcon,
                         tag: `msg-${payload.conversationId || "general"}`,
                     });

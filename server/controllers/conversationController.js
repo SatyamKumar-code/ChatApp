@@ -1,6 +1,7 @@
 import Conversation from "../models/Conversation.js";
 import User from "../models/User.js";
 import Message from "../models/Message.js";
+import mongoose from "mongoose";
 import { isUserOnline } from "../socket/socketServer.js";
 
 // Helper to create and broadcast system audit messages in group chats
@@ -36,7 +37,7 @@ const createAndBroadcastSystemMessage = async (conversationId, senderId, text, i
 };
 
 // Helper to format a conversation for clients
-const formatConversationForClient = (conversation, currentUserId) => {
+const formatConversationForClient = (conversation, currentUserId, sentMessagesCount = 0, unreadCount = 0) => {
     const isPinned = Boolean(
         conversation.pinnedBy &&
         conversation.pinnedBy.some(
@@ -115,6 +116,7 @@ const formatConversationForClient = (conversation, currentUserId) => {
                 ? (clientLastMessage.createdAt || conversation.lastMessageAt || conversation.updatedAt)
                 : (userJoinedEntry?.leftAt || userJoinedEntry?.joinedAt || conversation.createdAt),
             createdAt: conversation.createdAt,
+            unreadCount: unreadCount || 0,
         };
     } else {
         const otherUser = conversation.participants.find(
@@ -154,6 +156,8 @@ const formatConversationForClient = (conversation, currentUserId) => {
             lastMessage: conversation.lastMessage || null,
             lastMessageAt: conversation.lastMessageAt || conversation.updatedAt,
             createdAt: conversation.createdAt,
+            sentMessagesCount: sentMessagesCount || 0,
+            unreadCount: unreadCount || 0,
         };
     }
 };
@@ -197,8 +201,42 @@ const getMyConversations = async (req, res) => {
                 updatedAt: -1,
             });
 
+        // Compute unread messages count for each conversation
+        const allConvIds = conversations.map((c) => c._id);
+        const unreadCountMap = {};
+
+        if (allConvIds.length > 0) {
+            const currentObjectId = new mongoose.Types.ObjectId(req.user._id.toString());
+            const counts = await Message.aggregate([
+                {
+                    $match: {
+                        conversation: { $in: allConvIds },
+                        sender: { $ne: currentObjectId },
+                        isSeen: false,
+                        deletedFor: { $nin: [currentObjectId] },
+                        messageType: { $ne: "system" },
+                    },
+                },
+                {
+                    $group: {
+                        _id: "$conversation",
+                        count: { $sum: 1 },
+                    },
+                },
+            ]);
+
+            counts.forEach((c) => {
+                unreadCountMap[c._id.toString()] = c.count;
+            });
+        }
+
         const result = conversations.map((conv) =>
-            formatConversationForClient(conv, req.user._id)
+            formatConversationForClient(
+                conv,
+                req.user._id,
+                0,
+                unreadCountMap[conv._id.toString()] || 0
+            )
         );
 
         // Sort pinned chats to top

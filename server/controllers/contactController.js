@@ -1,10 +1,14 @@
 import Contact from "../models/Contact.js";
 import User from "../models/User.js";
+import Conversation from "../models/Conversation.js";
+import Message from "../models/Message.js";
+import mongoose from "mongoose";
 import { isUserOnline } from "../socket/socketServer.js";
 
 const getContacts = async (req, res) => {
     try {
         const currentUserId = req.user._id;
+        const currentObjectId = new mongoose.Types.ObjectId(currentUserId.toString());
         const currentUser = await User.findById(currentUserId).select("blockedUsers");
         const myBlocked = (currentUser?.blockedUsers || []).map((id) => (id?._id || id).toString());
 
@@ -13,6 +17,57 @@ const getContacts = async (req, res) => {
         })
             .populate("contactUser", "name phone profilePicture isOnline lastSeen blockedUsers")
             .sort({ name: 1 });
+
+        // Auto-link any contacts that were created before registration or missing contactUser
+        for (const contact of contacts) {
+            if (!contact.contactUser && contact.phone) {
+                const clean = contact.phone.replace(/\D/g, "");
+                const last10 = clean.slice(-10);
+                const foundUser = await User.findOne({
+                    $or: [
+                        { phone: contact.phone },
+                        ...(last10.length >= 7 ? [{ phone: { $regex: last10 } }] : []),
+                    ],
+                });
+                if (foundUser) {
+                    contact.contactUser = foundUser;
+                    await Contact.updateOne({ _id: contact._id }, { contactUser: foundUser._id }).catch(() => {});
+                }
+            }
+        }
+
+        // Find all 1-on-1 conversations involving current user
+        const oneOnOneConvs = await Conversation.find({
+            isGroup: { $ne: true },
+            participants: currentObjectId,
+        }).select("_id participants");
+
+        const convIds = oneOnOneConvs.map((c) => c._id);
+        const messageCountMap = {};
+
+        if (convIds.length > 0) {
+            const messageCounts = await Message.aggregate([
+                {
+                    $match: {
+                        conversation: { $in: convIds },
+                        sender: { $ne: currentObjectId },
+                        isSeen: false,
+                        deletedFor: { $nin: [currentObjectId] },
+                        messageType: { $ne: "system" },
+                    },
+                },
+                {
+                    $group: {
+                        _id: "$sender",
+                        count: { $sum: 1 },
+                    },
+                },
+            ]);
+
+            messageCounts.forEach((m) => {
+                messageCountMap[m._id.toString()] = m.count;
+            });
+        }
 
         const result = contacts.map((contact) => {
             const cUser = contact.contactUser;
@@ -40,12 +95,17 @@ const getContacts = async (req, res) => {
                 };
             }
 
+            const cUserIdStr = cUser?._id?.toString();
+            const unreadCount = cUserIdStr ? (messageCountMap[cUserIdStr] || 0) : 0;
+
             return {
                 _id: contact._id,
                 name: contact.name,
                 phone: contact.phone,
                 registered: Boolean(cUser),
                 user: formattedUser,
+                sentMessagesCount: unreadCount,
+                unreadCount,
             };
         });
 

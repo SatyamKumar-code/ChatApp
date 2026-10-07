@@ -1,7 +1,41 @@
 import "dotenv/config";
 import webpush from "web-push";
 import mongoose from "mongoose";
+import crypto from "node:crypto";
 import PushSubscription from "../models/PushSubscription.js";
+
+/**
+ * Decrypt E2EE message text for push notification preview
+ */
+export const decryptPushMessageText = (encryptedText, conversationId) => {
+    if (!encryptedText || typeof encryptedText !== "string") return "";
+    if (!encryptedText.startsWith("enc:v1:")) return encryptedText;
+    if (!conversationId) return "New message";
+
+    try {
+        const convIdStr = (conversationId?._id || conversationId).toString();
+        const rawSecret = `chatapp_e2ee_${convIdStr}_secure_seed_2026`;
+        const salt = `salt_${convIdStr}_chatapp`;
+        const key = crypto.pbkdf2Sync(rawSecret, salt, 100000, 32, "sha256");
+
+        const parts = encryptedText.split(":");
+        if (parts.length !== 4) return "New message";
+
+        const iv = Buffer.from(parts[2], "base64");
+        const cipherAndTag = Buffer.from(parts[3], "base64");
+        if (cipherAndTag.length <= 16) return "New message";
+
+        const tag = cipherAndTag.subarray(cipherAndTag.length - 16);
+        const ciphertext = cipherAndTag.subarray(0, cipherAndTag.length - 16);
+
+        const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+        decipher.setAuthTag(tag);
+        return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
+    } catch (e) {
+        console.warn("[PushService] Failed to decrypt preview text:", e.message);
+        return "New message";
+    }
+};
 
 let vapidConfigured = false;
 
@@ -173,7 +207,9 @@ export const sendMessagePush = async ({
     } else if (message.messageType === "file" || message.messageType === "document") {
         preview = message.fileName ? `📄 ${message.fileName}` : "📄 Document";
     } else if (message.text) {
-        preview = message.text.length > 80 ? `${message.text.substring(0, 80)}...` : message.text;
+        const convId = (conversation._id || conversation).toString();
+        const plainText = decryptPushMessageText(message.text, convId);
+        preview = plainText.length > 80 ? `${plainText.substring(0, 80)}...` : plainText;
     } else {
         preview = "New message";
     }

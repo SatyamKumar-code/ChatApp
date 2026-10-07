@@ -575,9 +575,20 @@ export const ChatList = ({
                                                 </p>
                                             )}
 
-                                            {lastMsg && !lastMsg.isSeen && !isMyMessage && (
-                                                <span className="w-2 h-2 rounded-full bg-purple-500 shrink-0 shadow-sm shadow-purple-500/50" />
-                                            )}
+                                            {(() => {
+                                                const unread = conv.unreadCount !== undefined
+                                                    ? conv.unreadCount
+                                                    : (lastMsg && !lastMsg.isSeen && !isMyMessage ? 1 : 0);
+                                                if (unread <= 0) return null;
+                                                return (
+                                                    <span
+                                                        title={`${unread} unread messages`}
+                                                        className="min-w-[19px] h-[19px] px-1 rounded-full bg-purple-600 text-white text-[11px] font-bold flex items-center justify-center shrink-0 shadow-sm shadow-purple-600/50 ring-1 ring-white/10 ml-2"
+                                                    >
+                                                        {unread > 99 ? "99+" : unread}
+                                                    </span>
+                                                );
+                                            })()}
                                         </div>
                                     </div>
                                 </div>
